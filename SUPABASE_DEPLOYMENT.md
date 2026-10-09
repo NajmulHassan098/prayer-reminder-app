@@ -33,6 +33,25 @@ supabase link --project-ref mpvmzwxsvufbfzhelwri
 supabase db push
 ```
 
+### Step 1b: Incremental migrations (for projects created from an older schema)
+
+`supabase/schema.sql` uses `CREATE TABLE IF NOT EXISTS`, so re-running it on an
+existing project does **not** add columns introduced later. If features like
+**Email preferences** fail with a "column ... does not exist" error (or the
+dashboard shows "We couldn't save your preferences ... the database may still
+need its one-time update"), apply these once in the SQL Editor. They are
+idempotent and safe to re-run:
+
+```sql
+ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS notification_prefs JSONB;
+ALTER TABLE responses     ADD COLUMN IF NOT EXISTS mark_source        TEXT;
+```
+
+- `user_profiles.notification_prefs` — per-user email opt-ins (`{ prayers, pre, post }`). `NULL` means all reminders enabled.
+- `responses.mark_source` — who/what set a status (`manual` | `email` | `auto`), so an auto-marked "missed" is distinguishable from a user tap. Powers the "Missed · auto" badge.
+
+No app restart is needed after running them — the columns are read live.
+
 ## Step 2: Configure Environment Variables
 
 1. Copy the example environment file:

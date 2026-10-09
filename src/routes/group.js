@@ -4,6 +4,7 @@ const { supabase, supabaseAdmin } = require("../supabase");
 const db = require("../db");
 const { requireLogin, requireGroupAdmin } = require("../middleware/auth");
 const { sendMail, invitationEmailHtml, groupAddedEmailHtml } = require("../services/email");
+const { siteOrigin } = require("../utils/siteUrl");
 
 const router = express.Router();
 const MAX_MEMBERS = 30;
@@ -166,8 +167,7 @@ router.post("/group/invite", requireLogin, requireGroupAdmin, async (req, res) =
     });
 
     // Send invitation email
-    const baseUrl = process.env.BASE_URL || 'http://localhost:3000';
-    const signupUrl = `${baseUrl}/register?invite=${token}`;
+    const signupUrl = `${siteOrigin()}/register?invite=${token}`;
 
     console.log(`[group-invite] Creating invitation for ${normalizedEmail} to group ${req.group.id}`);
     console.log(`[group-invite] Signup URL: ${signupUrl}`);

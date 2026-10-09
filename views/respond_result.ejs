@@ -1,17 +1,22 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Response Recorded</title>
-  <link rel="stylesheet" href="/style.css" />
+  <title>Response Recorded — Prayer Reminder</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+      <!-- Standalone page: stays dark by design (no theme toggle here). -->
+    <link rel="stylesheet" href="/style.css" />
 </head>
-<body>
-  <div class="container">
-    <div class="card center">
-      <h1><%= ok ? '✅ Thank you' : '⚠️ Oops' %></h1>
-      <p><%= message %></p>
-      <a href="/login" class="btn">Go to app</a>
+<body class="bg-slate-950 min-h-screen text-slate-100 antialiased flex items-center justify-center p-4" style="background-image: radial-gradient(60rem 60rem at 110% -10%, rgba(16,185,129,0.10), transparent 60%), radial-gradient(50rem 50rem at -10% 10%, rgba(99,102,241,0.10), transparent 55%);">
+  <div class="w-full max-w-md">
+    <div class="bg-slate-900/60 backdrop-blur border border-slate-800 rounded-2xl p-8 text-center shadow-xl shadow-black/20">
+      <div class="w-16 h-16 mx-auto mb-5 rounded-2xl flex items-center justify-center shadow-lg <% if (ok) { %>bg-gradient-to-br from-emerald-400 to-emerald-600 shadow-emerald-500/30<% } else { %>bg-gradient-to-br from-amber-400 to-amber-600 shadow-amber-500/30<% } %>">
+        <span class="text-3xl"><%= ok ? '✅' : '⚠️' %></span>
+      </div>
+      <h1 class="text-2xl font-bold text-white mb-3"><%= ok ? 'Thank you' : 'Oops' %></h1>
+      <p class="text-slate-400 mb-8"><%= message %></p>
+      <a href="/login" class="inline-block w-full py-3.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold rounded-xl shadow-lg shadow-emerald-500/20 transition-all transform hover:scale-[1.02]">Go to app</a>
     </div>
   </div>
 </body>

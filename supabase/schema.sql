@@ -19,6 +19,9 @@ CREATE TABLE IF NOT EXISTS user_profiles (
   city TEXT,
   country TEXT,
   group_id UUID REFERENCES groups(id) ON DELETE SET NULL,
+  -- Per-user email preferences: { "prayers": {Fajr,Dhuhr,Asr,Maghrib,Isha: bool}, pre: bool, post: bool }.
+  -- NULL means "all enabled" so existing users keep receiving every reminder until they opt out.
+  notification_prefs JSONB,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -41,6 +44,10 @@ CREATE TABLE IF NOT EXISTS responses (
   prayer_name TEXT NOT NULL, -- Fajr / Dhuhr / Asr / Maghrib / Isha
   date TEXT NOT NULL, -- YYYY-MM-DD
   status TEXT NOT NULL DEFAULT 'pending', -- pending | done | missed
+  -- Who/what set the current status, so an auto-marked "missed" (no response) is
+  -- distinguishable from one the user tapped. NULL on rows created before this
+  -- column existed. manual = dashboard button, email = follow-up link, auto = system.
+  mark_source TEXT,
   notified_at TIMESTAMP WITH TIME ZONE,
   followup_sent_at TIMESTAMP WITH TIME ZONE,
   responded_at TIMESTAMP WITH TIME ZONE,
@@ -48,12 +55,22 @@ CREATE TABLE IF NOT EXISTS responses (
 );
 
 -- Notifications log table
+-- One row per (user, prayer, LOCAL date, email type) — the unique key below is
+-- the dedup contract the scheduler relies on (insert-first claim, ON CONFLICT DO
+-- NOTHING). status:
+--   sent          = email actually delivered
+--   skipped_stale = send window (scheduled_at .. +SEND_GRACE_MINUTES) closed
+--                   before a tick ran; recorded so it is never retried
+--   sending       = transient claim while SMTP is in flight; deleted again if
+--                   the send fails so the next tick can retry inside the window
 CREATE TABLE IF NOT EXISTS notifications_log (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   user_id UUID NOT NULL,
   prayer_name TEXT NOT NULL,
-  date TEXT NOT NULL,
+  date TEXT NOT NULL, -- YYYY-MM-DD in the USER's timezone
   type TEXT NOT NULL, -- reminder | followup
+  status TEXT NOT NULL DEFAULT 'sent', -- sent | skipped_stale | sending
+  scheduled_at TIMESTAMP WITH TIME ZONE, -- UTC instant the email was due at
   sent_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   UNIQUE(user_id, prayer_name, date, type)
 );

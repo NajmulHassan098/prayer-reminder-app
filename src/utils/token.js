@@ -10,4 +10,22 @@ function verifyResponseToken(token) {
   return jwt.verify(token, SECRET); // throws if invalid/expired
 }
 
-module.exports = { createResponseToken, verifyResponseToken };
+// Short-lived, single-purpose token for password resets.
+function createPasswordResetToken(userId) {
+  return jwt.sign({ userId, purpose: "password_reset" }, SECRET, { expiresIn: "1h" });
+}
+
+function verifyPasswordResetToken(token) {
+  const payload = jwt.verify(token, SECRET); // throws if invalid/expired
+  if (payload.purpose !== "password_reset") {
+    throw new Error("Invalid token purpose");
+  }
+  return payload;
+}
+
+module.exports = {
+  createResponseToken,
+  verifyResponseToken,
+  createPasswordResetToken,
+  verifyPasswordResetToken,
+};

@@ -1,0 +1,67 @@
+<!-- Shared Apple-style site footer (supports day/night theme) -->
+<footer class="site-footer mt-16">
+  <div class="footer-inner">
+    <div class="footer-cols">
+      <div class="footer-col">
+        <h4>Your Salah</h4>
+        <ul>
+          <li><a href="/dashboard">Dashboard</a></li>
+          <li><a href="/weekly">Weekly prayer table</a></li>
+          <li><a href="/profile">Your profile</a></li>
+          <% if (typeof isAdmin !== 'undefined' && isAdmin) { %>
+            <li><a href="/admin">Admin dashboard</a></li>
+          <% } %>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4>Your Group</h4>
+        <ul>
+          <li><a href="/dashboard">Group activity</a></li>
+          <li><a href="/dashboard">Group prayer log</a></li>
+          <li><a href="/group/new">Create a group</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4>Learn</h4>
+        <ul>
+          <li><a href="#">How it works</a></li>
+          <li><a href="#">Prayer times &amp; methods</a></li>
+          <li><a href="#">Daily reminders</a></li>
+          <li><a href="#">About the app</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4>Support</h4>
+        <ul>
+          <li><a href="#">Contact us</a></li>
+          <li><a href="#">Help &amp; FAQ</a></li>
+          <li><a href="#">Report an issue</a></li>
+          <li><a href="#">Community guidelines</a></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="footer-region">
+      Prayer Reminder is available in:
+      <a href="#">English</a> ·
+      <a href="#">العربية</a> ·
+      <a href="#">اردو</a> ·
+      <a href="#">Türkçe</a> ·
+      <a href="#">Bahasa Indonesia</a> ·
+      <a href="#">Français</a> ·
+      <a href="#">Deutsch</a>
+    </div>
+
+    <div class="footer-bottom">
+      <span>Copyright © 2026 Prayer Reminder. All rights reserved.</span>
+      <span class="sep">|</span>
+      <a href="#">Privacy Policy</a>
+      <span class="sep">|</span>
+      <a href="#">Terms of Service</a>
+      <span class="sep">|</span>
+      <a href="#">Cookie Warning</a>
+      <span class="sep">|</span>
+      <a href="#">Support</a>
+    </div>
+  </div>
+</footer>

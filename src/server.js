@@ -7,6 +7,7 @@ const authRoutes = require("./routes/auth");
 const groupRoutes = require("./routes/group");
 const dashboardRoutes = require("./routes/dashboard");
 const responseRoutes = require("./routes/response");
+const profileRoutes = require("./routes/profile");
 const scheduler = require("./services/scheduler");
 const { SupabaseSessionStore } = require("./sessionStore");
 const { supabaseAdmin } = require("./supabase");
@@ -105,6 +106,7 @@ app.use(dashboardRoutes);
 app.use(authRoutes);
 app.use(groupRoutes);
 app.use(responseRoutes);
+app.use(profileRoutes);
 
 app.use((req, res) => res.status(404).send("Not found"));
 

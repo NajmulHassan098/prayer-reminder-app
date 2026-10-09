@@ -32,9 +32,10 @@
       },
     }
   </script>
-  <link rel="stylesheet" href="/style.css" />
+      <!-- Standalone auth page: stays dark by design (no theme toggle here). -->
+    <link rel="stylesheet" href="/style.css" />
 </head>
-<body class="bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 min-h-screen flex items-center justify-center p-4">
+<body class="bg-slate-950 min-h-screen text-slate-100 antialiased flex items-center justify-center p-4" style="background-image: radial-gradient(60rem 60rem at 110% -10%, rgba(16,185,129,0.10), transparent 60%), radial-gradient(50rem 50rem at -10% 10%, rgba(99,102,241,0.10), transparent 55%);">
   <div class="w-full max-w-md">
     <!-- Back to Home -->
     <div class="mb-6 text-center">
@@ -47,7 +48,7 @@
     </div>
 
     <!-- Login Card -->
-    <div class="bg-dark-card rounded-2xl p-8 shadow-2xl border border-white/10">
+    <div class="bg-dark-card rounded-2xl p-8 shadow-2xl border border-slate-800">
       <!-- Logo -->
       <div class="text-center mb-8">
         <div class="w-16 h-16 bg-gradient-to-br from-primary-500 to-primary-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-primary-500/30">
@@ -60,6 +61,12 @@
       <% if (error) { %>
         <div class="bg-red-500/10 border border-red-500/20 text-red-400 p-4 rounded-xl mb-6">
           <%= error %>
+        </div>
+      <% } %>
+
+      <% if (typeof message !== 'undefined' && message) { %>
+        <div class="bg-primary-500/10 border border-primary-500/20 text-primary-300 p-4 rounded-xl mb-6">
+          <%= message %>
         </div>
       <% } %>
 
@@ -98,7 +105,7 @@
             <input type="checkbox" class="w-4 h-4 rounded border-white/20 bg-dark-input text-primary-500 focus:ring-primary-500">
             Remember me
           </label>
-          <a href="#" class="text-primary-400 hover:text-primary-300 text-sm">Forgot password?</a>
+          <a href="/forgot-password" class="text-primary-400 hover:text-primary-300 text-sm">Forgot password?</a>
         </div>
 
         <!-- Submit Button -->

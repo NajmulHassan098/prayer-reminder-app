@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Group Prayer Log — Prayer Reminder</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Noto+Naskh+Arabic:wght@400;700&display=swap" rel="stylesheet">
+  <script src="/theme.js"></script>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body class="bg-slate-950 min-h-screen text-slate-100 antialiased" style="background-image: radial-gradient(60rem 60rem at 110% -10%, rgba(16,185,129,0.10), transparent 60%), radial-gradient(50rem 50rem at -10% 10%, rgba(99,102,241,0.10), transparent 55%);">
+  <%- include('components/navigation', { isAdmin, user }) %>
+
+  <div class="container mx-auto px-4 pt-24 pb-12 max-w-4xl">
+
+    <a href="/dashboard" class="inline-flex items-center gap-1.5 text-slate-400 hover:text-emerald-400 transition-colors text-sm mb-4">
+      <span aria-hidden="true">&larr;</span> Back to dashboard
+    </a>
+
+    <div class="bg-slate-900/60 backdrop-blur border border-slate-800 rounded-2xl p-6 mb-6 shadow-xl shadow-black/20">
+      <div class="flex items-start justify-between gap-4 mb-1">
+        <h1 class="text-2xl font-bold text-white">Group prayer log</h1>
+        <% if (group) { %>
+          <a href="/weekly" class="shrink-0 text-emerald-400 hover:text-emerald-300 text-sm font-medium">Full weekly table &rarr;</a>
+        <% } %>
+      </div>
+
+      <% if (!group) { %>
+        <p class="text-slate-400 mt-3 mb-2">You're not in a group yet, so there's no shared log to show.</p>
+        <a href="/group/new" class="inline-block mt-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 px-5 py-2.5 rounded-xl font-semibold transition-colors shadow-lg shadow-emerald-500/20">Create a group</a>
+      <% } else { %>
+        <p class="text-slate-400 text-sm mt-3 mb-5">
+          Recent responses, day by day, for everyone in
+          <strong class="text-slate-200"><%= group.name %></strong>.
+        </p>
+
+        <% if (groupHistory.length === 0) { %>
+          <div class="text-center py-10">
+            <div class="w-14 h-14 bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-3">
+              <span class="text-2xl">📖</span>
+            </div>
+            <p class="text-slate-400">No group responses logged yet.</p>
+          </div>
+        <% } else { %>
+          <%
+            // Turn the flat log into a scannable timeline: group by date, then by
+            // member, so each name/date appears once instead of on every row.
+            function chipClass(s){
+              return s==='done'    ? 'bg-emerald-500/10 text-emerald-300 ring-emerald-500/30'
+                   : s==='missed'  ? 'bg-red-500/10 text-red-300 ring-red-500/30'
+                   : s==='pending' ? 'bg-amber-500/10 text-amber-300 ring-amber-500/30'
+                   : 'bg-slate-500/10 text-slate-400 ring-slate-500/30';
+            }
+            function chipIcon(s){ return s==='done' ? '✓' : s==='missed' ? '✗' : s==='pending' ? '○' : '—'; }
+            var byDate = {};
+            groupHistory.forEach(function(r){
+              if (!byDate[r.date]) byDate[r.date] = {};
+              if (!byDate[r.date][r.memberName]) byDate[r.date][r.memberName] = [];
+              byDate[r.date][r.memberName].push(r);
+            });
+            var logDates = Object.keys(byDate); // newest first (groupHistory is sorted)
+          %>
+          <div class="flex flex-wrap items-center gap-x-4 gap-y-1 mb-5 text-xs text-slate-400">
+            <span class="inline-flex items-center"><span class="w-2 h-2 rounded-full bg-emerald-400 mr-1.5"></span>Prayed</span>
+            <span class="inline-flex items-center"><span class="w-2 h-2 rounded-full bg-red-400 mr-1.5"></span>Not prayed</span>
+            <span class="inline-flex items-center"><span class="w-2 h-2 rounded-full bg-amber-400 mr-1.5"></span>Pending</span>
+          </div>
+          <div class="space-y-6">
+            <% logDates.forEach(function(date){ %>
+              <div>
+                <div class="flex items-center gap-3 mb-3">
+                  <span class="shrink-0 text-xs font-bold uppercase tracking-wider text-emerald-300 bg-emerald-500/10 ring-1 ring-inset ring-emerald-500/30 px-3 py-1 rounded-full"><%= date %></span>
+                  <div class="h-px flex-1 bg-slate-800"></div>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <% Object.keys(byDate[date]).forEach(function(memberName){ %>
+                    <% var entries = byDate[date][memberName]; var isYou = entries.some(function(e){ return e.user_id === user.id; }); var doneCount = entries.filter(function(e){ return e.status === 'done'; }).length; %>
+                    <div data-member="<%= memberName.toLowerCase() %>" class="bg-slate-800/40 border border-slate-700/60 rounded-xl p-4 <%= isYou ? 'ring-1 ring-inset ring-emerald-500/30' : '' %>">
+                      <div class="flex items-center justify-between mb-3">
+                        <span class="font-semibold text-white flex items-center">
+                          <%= memberName %>
+                          <% if (isYou) { %><span class="ml-2 text-[10px] font-bold uppercase tracking-wider text-emerald-300 bg-emerald-500/10 ring-1 ring-inset ring-emerald-500/30 px-2 py-0.5 rounded-full">You</span><% } %>
+                        </span>
+                        <span class="text-[11px] font-medium text-slate-400"><%= doneCount %>/<%= PRAYERS.length %></span>
+                      </div>
+                      <div class="flex flex-wrap gap-1.5">
+                        <% entries.forEach(function(e){ %>
+                          <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold ring-1 ring-inset <%= chipClass(e.status) %>" title="<%= e.prayer_name %> — <%= e.status %>">
+                            <span class="mr-1"><%= chipIcon(e.status) %></span><%= e.prayer_name %>
+                          </span>
+                        <% }); %>
+                      </div>
+                    </div>
+                  <% }); %>
+                </div>
+              </div>
+            <% }); %>
+          </div>
+        <% } %>
+      <% } %>
+    </div>
+
+  </div>
+</body>
+</html>

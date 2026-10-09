@@ -1,8 +1,21 @@
 const express = require("express");
 const { supabase, supabaseAdmin } = require("../supabase");
 const db = require("../db");
+const { createPasswordResetToken, verifyPasswordResetToken } = require("../utils/token");
+const { sendMail, resetPasswordEmailHtml } = require("../services/email");
+const { siteOrigin } = require("../utils/siteUrl");
 
 const router = express.Router();
+
+// Find a Supabase auth user by email using the admin (service-role) client.
+// supabase-js has no getUserByEmail, so we list and match.
+async function findAuthUserByEmail(email) {
+  const normalized = (email || "").toLowerCase().trim();
+  const { data } = await supabaseAdmin.auth.admin.listUsers();
+  return (data && data.users ? data.users : []).find(
+    (u) => (u.email || "").toLowerCase() === normalized
+  ) || null;
+}
 
 router.get("/register", async (req, res) => {
   const inviteToken = req.query.invite || null;
@@ -157,7 +170,10 @@ router.post("/signup", (req, res) => {
 });
 
 router.get("/login", (req, res) => {
-  res.render("login", { error: null });
+  const message = req.query.reset === "success"
+    ? "Your password has been reset. You can now log in with your new password."
+    : null;
+  res.render("login", { error: null, message });
 });
 
 router.post("/login", async (req, res) => {
@@ -175,17 +191,38 @@ router.post("/login", async (req, res) => {
       console.error(`[login] Supabase auth error:`, error);
       // Provide more specific error messages
       if (error.message.includes('Invalid login credentials')) {
-        return res.render("login", { error: "Invalid email or password. Please check your credentials and try again." });
+        return res.render("login", { error: "Invalid email or password. Please check your credentials and try again.", message: null });
       }
       if (error.message.includes('Email not confirmed')) {
-        return res.render("login", { error: "Please confirm your email address before logging in." });
+        // This app auto-confirms at signup and never sends verification emails,
+        // so an unconfirmed account (e.g. created before that behaviour or via
+        // the dashboard) would otherwise be permanently locked out. Self-heal:
+        // confirm the email with the admin client, then retry the sign-in once.
+        try {
+          const unconfirmed = await findAuthUserByEmail(email);
+          if (unconfirmed && !unconfirmed.email_confirmed_at) {
+            await supabaseAdmin.auth.admin.updateUserById(unconfirmed.id, { email_confirm: true });
+            console.log(`[login] Auto-confirmed email for ${email}, retrying sign-in`);
+            const retry = await supabase.auth.signInWithPassword({
+              email: email.toLowerCase().trim(),
+              password: password
+            });
+            if (!retry.error && retry.data.user) {
+              req.session.userId = retry.data.user.id;
+              return res.redirect("/dashboard");
+            }
+          }
+        } catch (healErr) {
+          console.error(`[login] Auto-confirm healing failed:`, healErr);
+        }
+        return res.render("login", { error: "Please confirm your email address before logging in.", message: null });
       }
-      return res.render("login", { error: error.message });
+      return res.render("login", { error: error.message, message: null });
     }
 
     if (!data.user) {
       console.error(`[login] No user data returned`);
-      return res.render("login", { error: "Login failed. Please try again." });
+      return res.render("login", { error: "Login failed. Please try again.", message: null });
     }
 
     // Check if user profile exists
@@ -203,7 +240,7 @@ router.post("/login", async (req, res) => {
         console.log(`[login] Created missing profile for user: ${data.user.id}`);
       } catch (profileError) {
         console.error(`[login] Failed to create profile:`, profileError);
-        return res.render("login", { error: "Account setup incomplete. Please contact support." });
+        return res.render("login", { error: "Account setup incomplete. Please contact support.", message: null });
       }
     }
 
@@ -213,7 +250,88 @@ router.post("/login", async (req, res) => {
 
   } catch (error) {
     console.error(`[login] Error:`, error);
-    res.render("login", { error: "An error occurred during login. Please try again." });
+    res.render("login", { error: "An error occurred during login. Please try again.", message: null });
+  }
+});
+
+// ---- Forgot / reset password -------------------------------------------------
+
+router.get("/forgot-password", (req, res) => {
+  res.render("forgot_password", { error: null, submitted: false });
+});
+
+router.post("/forgot-password", async (req, res) => {
+  const { email } = req.body;
+  if (!email) {
+    return res.render("forgot_password", { error: "Please enter your email address.", submitted: false });
+  }
+
+  try {
+    const user = await findAuthUserByEmail(email);
+    // Only act when the account exists; always show the same response so this
+    // endpoint cannot be used to enumerate registered emails.
+    if (user) {
+      const token = createPasswordResetToken(user.id);
+      const resetUrl = `${siteOrigin()}/reset-password?token=${encodeURIComponent(token)}`;
+      const name = (user.user_metadata && user.user_metadata.name) || "";
+      const result = await sendMail({
+        to: (email || "").toLowerCase().trim(),
+        subject: "Reset your Prayer Reminder password",
+        html: resetPasswordEmailHtml(name, resetUrl),
+      });
+      console.log(`[forgot-password] Reset email result for ${email}:`, result.success ? 'sent' : result.error);
+    }
+    return res.render("forgot_password", { error: null, submitted: true });
+  } catch (error) {
+    console.error(`[forgot-password] Error:`, error);
+    return res.render("forgot_password", { error: "Something went wrong. Please try again later.", submitted: false });
+  }
+});
+
+router.get("/reset-password", async (req, res) => {
+  const token = req.query.token || null;
+  if (!token) {
+    return res.render("reset_password", { error: "Invalid or missing reset link.", token: null });
+  }
+  try {
+    verifyPasswordResetToken(token); // throws if invalid/expired
+    res.render("reset_password", { error: null, token });
+  } catch (err) {
+    res.render("reset_password", { error: "This reset link is invalid or has expired. Please request a new one.", token: null });
+  }
+});
+
+router.post("/reset-password", async (req, res) => {
+  const { token, password, confirm } = req.body;
+
+  const fail = (msg) => res.render("reset_password", { error: msg, token: token || null });
+
+  if (!token) return fail("Missing reset token.");
+  if (!password || password.length < 8) return fail("Password must be at least 8 characters.");
+  if (password !== confirm) return fail("Passwords do not match.");
+
+  let payload;
+  try {
+    payload = verifyPasswordResetToken(token);
+  } catch (err) {
+    return fail("This reset link is invalid or has expired. Please request a new one.");
+  }
+
+  try {
+    const { error } = await supabaseAdmin.auth.admin.updateUserById(payload.userId, {
+      password: password,
+      // Ensure a password change also clears any unconfirmed-email lockout.
+      email_confirm: true,
+    });
+    if (error) {
+      console.error(`[reset-password] update error:`, error);
+      return fail("We could not reset your password. Please try again.");
+    }
+    console.log(`[reset-password] Password reset for user ${payload.userId}`);
+    return res.redirect("/login?reset=success");
+  } catch (error) {
+    console.error(`[reset-password] Error:`, error);
+    return fail("Something went wrong. Please try again later.");
   }
 });
 

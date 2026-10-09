@@ -1,16 +1,21 @@
+/* Dark theme base tokens — keeps the page background dark while Tailwind
+   loads (avoids a white flash) and styles any residual legacy classes. */
 :root {
-  --green: #1f6f4a;
-  --green-dark: #14523569;
-  --bg: #f6f7f4;
-  --card: #ffffff;
-  --border: #e2e2e2;
-  --text: #222;
-  --muted: #6b6b6b;
-  --danger: #c62828;
-  --pending: #b58900;
+  color-scheme: dark;
+  --green: #10b981;
+  --green-dark: #047857;
+  --bg: #020617;
+  --card: #0f172a;
+  --border: #1e293b;
+  --text: #e2e8f0;
+  --muted: #94a3b8;
+  --danger: #f87171;
+  --pending: #fbbf24;
 }
 
 * { box-sizing: border-box; }
+
+html { background: var(--bg); }
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
@@ -44,6 +49,7 @@ body {
   border-radius: 10px;
   padding: 24px;
   margin-bottom: 20px;
+  color: var(--text);
 }
 
 h1, h2, h3 { margin-top: 0; }
@@ -51,17 +57,15 @@ h1, h2, h3 { margin-top: 0; }
 .form-group { margin-bottom: 16px; }
 label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 14px; }
 
-input[type=text], input[type=email], input[type=password] {
-  width: 100%;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  font-size: 14px;
-}
+/* Form inputs are styled with Tailwind utilities per view (px-4/py-3/pl-12,
+   bg-*, rounded-xl, placeholder-*). We intentionally do NOT define a global
+   input[type=…] rule here: element+attribute selectors (0-1-1) out-specify
+   Tailwind utilities (0-1-0), which would clobber per-input padding, push
+   text under leading icons, and override the intended background/radius. */
 
 button, .btn {
   background: var(--green);
-  color: white;
+  color: #020617;
   border: none;
   padding: 10px 18px;
   border-radius: 6px;
@@ -72,8 +76,10 @@ button, .btn {
   display: inline-block;
 }
 
-.btn.secondary { background: #eee; color: var(--text); }
-.btn.danger { background: var(--danger); }
+.btn.secondary { background: #1e293b; color: var(--text); border: 1px solid var(--border); }
+.btn.danger { background: var(--danger); color: #fff; }
+
+a { color: var(--green); }
 
 .error { color: var(--danger); font-size: 14px; margin-bottom: 12px; }
 .muted { color: var(--muted); font-size: 14px; }
@@ -83,17 +89,18 @@ th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--bor
 th { color: var(--muted); font-weight: 600; }
 
 .badge { display: inline-block; padding: 3px 9px; border-radius: 20px; font-size: 12px; font-weight: 700; }
-.badge.done { background: #e6f4ea; color: var(--green); }
-.badge.missed { background: #fdecea; color: var(--danger); }
-.badge.pending { background: #fff8e1; color: var(--pending); }
-.badge.none { background: #f0f0f0; color: var(--muted); }
+.badge.done { background: rgba(16, 185, 129, 0.12); color: #6ee7b7; }
+.badge.missed { background: rgba(239, 68, 68, 0.12); color: #fca5a5; }
+.badge.pending { background: rgba(245, 158, 11, 0.12); color: #fcd34d; }
+.badge.none { background: rgba(100, 116, 139, 0.15); color: #94a3b8; }
 
 .code-box {
   font-family: monospace;
   font-size: 22px;
   letter-spacing: 3px;
-  background: #f0f7f2;
+  background: rgba(16, 185, 129, 0.08);
   border: 1px dashed var(--green);
+  color: var(--text);
   padding: 12px 16px;
   border-radius: 8px;
   display: inline-block;
@@ -107,7 +114,8 @@ th { color: var(--muted); font-weight: 600; }
 }
 .time-cell {
   text-align: center;
-  background: #f0f7f2;
+  background: #1e293b;
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 12px 6px;
 }
@@ -273,7 +281,7 @@ th { color: var(--muted); font-weight: 600; }
 .prayer-actions form { margin: 0; }
 .mini-btn {
   border: 1px solid var(--border);
-  background: white;
+  background: #1e293b;
   color: var(--text);
   font-size: 11px;
   padding: 5px 8px;
@@ -282,13 +290,13 @@ th { color: var(--muted); font-weight: 600; }
   font-weight: 600;
   white-space: nowrap;
 }
-.mini-btn.done.active { background: var(--green); color: white; border-color: var(--green); }
+.mini-btn.done.active { background: var(--green); color: #020617; border-color: var(--green); }
 .mini-btn.missed.active { background: var(--danger); color: white; border-color: var(--danger); }
 
 .member-count-badge {
   display: inline-block;
-  background: #f0f7f2;
-  border: 1px solid #cfe6d6;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.3);
   color: var(--green);
   font-weight: 700;
   padding: 3px 10px;
@@ -304,3 +312,134 @@ th { color: var(--muted); font-weight: 600; }
   flex-wrap: wrap;
   gap: 12px;
 }
+
+/* ==========================================================================
+   DAY / NIGHT THEME
+   The app is authored dark-first with hardcoded Tailwind slate utilities.
+   Rather than rewrite every page, we remap those utilities to light values
+   when <html data-theme="light"> is set. Dark is the default (no attribute).
+   ========================================================================== */
+
+:root {
+  --ease-theme: 0.25s ease;
+}
+
+/* Smooth the switch for the surfaces we remap. */
+html[data-theme="light"] body,
+html[data-theme="light"] .theme-fade {
+  transition: background-color var(--ease-theme), color var(--ease-theme), border-color var(--ease-theme);
+}
+
+/* Base surfaces */
+/* Light mode uses a soft, faintly cool off-white (#e9eef3) rather than flat
+   white, so the near-white cards (.bg-slate-900/60, .bg-slate-900) read as
+   elevated surfaces. Dark text keeps strong contrast against it. */
+html[data-theme="light"] body { background-color: #e9eef3 !important; color: #0f172a; }
+html[data-theme="light"] .bg-slate-950 { background-color: #e9eef3; }
+html[data-theme="light"] .bg-slate-950\/80 { background-color: rgba(255, 255, 255, 0.82); }
+html[data-theme="light"] .bg-slate-900\/60 { background-color: rgba(255, 255, 255, 0.85); }
+html[data-theme="light"] .bg-slate-900 { background-color: #ffffff; }
+html[data-theme="light"] .bg-slate-800\/60 { background-color: #eef2f7; }
+html[data-theme="light"] .bg-slate-800\/50 { background-color: #f1f5f9; }
+html[data-theme="light"] .bg-slate-800\/40 { background-color: #f1f5f9; }
+html[data-theme="light"] .bg-slate-800 { background-color: #e2e8f0; }
+html[data-theme="light"] .hover\:bg-slate-800:hover { background-color: #e2e8f0; }
+html[data-theme="light"] .bg-slate-700\/50 { background-color: #e2e8f0; }
+html[data-theme="light"] .bg-slate-700\/40 { background-color: #e2e8f0; }
+html[data-theme="light"] .bg-slate-700 { background-color: #cbd5e1; }
+
+/* Text */
+html[data-theme="light"] .text-slate-100 { color: #0f172a; }
+html[data-theme="light"] .text-slate-200 { color: #1e293b; }
+html[data-theme="light"] .text-slate-300 { color: #334155; }
+html[data-theme="light"] .text-slate-400 { color: #475569; }
+html[data-theme="light"] .text-slate-500 { color: #64748b; }
+
+/* White text on dark card surfaces must flip; white on colored gradients stays. */
+html[data-theme="light"] nav .text-white,
+html[data-theme="light"] footer .text-white,
+html[data-theme="light"] .bg-slate-900\/60 .text-white,
+html[data-theme="light"] .bg-slate-800\/40 .text-white,
+html[data-theme="light"] .bg-slate-800\/50 .text-white,
+html[data-theme="light"] .bg-slate-800\/60 .text-white { color: #0f172a; }
+
+/* Borders, dividers, rings */
+html[data-theme="light"] .border-slate-800 { border-color: #e2e8f0; }
+html[data-theme="light"] .border-slate-700\/60 { border-color: #e2e8f0; }
+html[data-theme="light"] .divide-slate-800 > * + * { border-color: #e2e8f0; }
+html[data-theme="light"] .ring-slate-700 { --tw-ring-color: #cbd5e1; }
+
+/* Accent contrast on light backgrounds */
+html[data-theme="light"] .text-emerald-300 { color: #047857; }
+html[data-theme="light"] .text-emerald-400 { color: #059669; }
+
+/* Theme toggle icons: dark shows the sun (→ go light), light shows the moon (→ go dark). */
+.theme-icon-moon { display: none; }
+html[data-theme="light"] .theme-icon-moon { display: block; }
+html[data-theme="light"] .theme-icon-sun { display: none; }
+
+/* ==========================================================================
+   MEMBER SEARCH (live client-side filter)
+   ========================================================================== */
+.member-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 9999px;
+  padding: 6px 14px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.member-search:focus-within { border-color: #10b981; box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15); }
+.member-search input {
+  background: transparent;
+  border: none;
+  outline: none;
+  color: inherit;
+  font-size: 14px;
+  width: 100%;
+  padding: 0;
+}
+.member-search input::placeholder { color: #64748b; }
+html[data-theme="light"] .member-search { background: #ffffff; border-color: #e2e8f0; }
+html[data-theme="light"] .member-search input { color: #0f172a; }
+.member-search svg { flex-shrink: 0; }
+
+/* ==========================================================================
+   APPLE-STYLE FOOTER
+   ========================================================================== */
+.site-footer { background: #0b1220; border-top: 1px solid #1e293b; color: #94a3b8; }
+html[data-theme="light"] .site-footer { background: #f1f5f9; border-top-color: #e2e8f0; color: #475569; }
+.footer-inner { max-width: 80rem; margin: 0 auto; padding: 48px 24px 24px; }
+.footer-cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 32px;
+  padding-bottom: 32px;
+}
+.footer-col h4 { font-size: 13px; font-weight: 700; color: #e2e8f0; margin: 0 0 14px; letter-spacing: 0.02em; }
+html[data-theme="light"] .footer-col h4 { color: #0f172a; }
+.footer-col ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.footer-col a { color: #94a3b8; text-decoration: none; font-size: 13px; transition: color 0.15s ease; }
+.footer-col a:hover { color: #34d399; }
+html[data-theme="light"] .footer-col a { color: #64748b; }
+html[data-theme="light"] .footer-col a:hover { color: #059669; }
+.footer-region { font-size: 13px; padding: 20px 0; border-top: 1px solid #1e293b; }
+html[data-theme="light"] .footer-region { border-top-color: #e2e8f0; }
+.footer-region a { color: inherit; text-decoration: none; }
+.footer-region a:hover { text-decoration: underline; }
+.footer-bottom {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 18px;
+  font-size: 12px;
+  padding-top: 16px;
+  border-top: 1px solid #1e293b;
+}
+html[data-theme="light"] .footer-bottom { border-top-color: #e2e8f0; }
+.footer-bottom .sep { color: #334155; }
+html[data-theme="light"] .footer-bottom .sep { color: #cbd5e1; }
+.footer-bottom a { color: inherit; text-decoration: none; }
+.footer-bottom a:hover { text-decoration: underline; }

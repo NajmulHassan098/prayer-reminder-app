@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Today — Prayer Reminder</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Noto+Naskh+Arabic:wght@400;700&display=swap" rel="stylesheet">
+  <script src="/theme.js"></script>
+    <link rel="stylesheet" href="/style.css" />
+</head>
+<body class="bg-slate-950 min-h-screen text-slate-100 antialiased" style="background-image: radial-gradient(60rem 60rem at 110% -10%, rgba(16,185,129,0.10), transparent 60%), radial-gradient(50rem 50rem at -10% 10%, rgba(99,102,241,0.10), transparent 55%);">
+  <%- include('components/navigation', { user, isAdmin: false }) %>
+  <div class="container mx-auto px-4 pt-24 pb-12 max-w-2xl">
+
+    <div class="mb-6">
+      <h1 class="text-2xl font-bold text-white mb-1">Today</h1>
+      <p class="text-slate-400">Live countdown and schedule for <span class="text-slate-300"><%= user.city %>, <%= user.country %></span>.</p>
+    </div>
+
+    <% if (apiError) { %>
+      <div class="bg-red-500/10 border border-red-500/30 text-red-300 rounded-2xl p-4 mb-6"><%= apiError %></div>
+    <% } %>
+
+    <!-- Animated next-prayer countdown ring -->
+    <% if (nextPrayer) { %>
+      <div class="bg-gradient-to-br from-emerald-600 to-teal-700 rounded-3xl p-8 sm:p-10 mb-6 text-center shadow-xl shadow-emerald-900/30 ring-1 ring-inset ring-white/10">
+        <div id="countdown-ring" class="relative mx-auto w-[240px] max-w-full aspect-square"
+             data-target="<%= nextPrayer.atUTC.toISOString() %>"
+             data-start="<%= nextPrayer.prevAtUTC ? nextPrayer.prevAtUTC.toISOString() : '' %>">
+          <svg viewBox="0 0 240 240" class="block w-full h-full -rotate-90">
+            <circle cx="120" cy="120" r="104" fill="none" stroke="rgba(255,255,255,0.14)" stroke-width="14"/>
+            <circle id="ring-progress" cx="120" cy="120" r="104" fill="none" stroke="#fbbf24" stroke-width="14"
+                    stroke-linecap="round" stroke-dasharray="653.45" stroke-dashoffset="653.45"
+                    style="transition:stroke-dashoffset 1s linear"/>
+          </svg>
+          <div class="absolute inset-0 flex flex-col items-center justify-center text-center px-8">
+            <p class="text-emerald-100/90 text-[10px] font-bold tracking-[0.15em] uppercase">Next prayer</p>
+            <p class="text-white text-3xl font-extrabold leading-tight mt-1"><%= nextPrayer.name %></p>
+            <p id="countdown-timer" class="font-mono tabular-nums text-amber-200 text-base mt-2 leading-tight">calculating…</p>
+          </div>
+        </div>
+        <p class="text-emerald-100/80 text-sm mt-5">until <%= nextPrayer.isTomorrow ? 'Fajr tomorrow' : nextPrayer.name %></p>
+      </div>
+    <% } %>
+
+    <!-- Today's schedule -->
+    <% if (todayTimes) { %>
+      <div class="bg-slate-900/60 backdrop-blur border border-slate-800 rounded-2xl p-6 mb-6 shadow-xl shadow-black/20">
+        <h2 class="text-lg font-bold text-white mb-4">Today's schedule</h2>
+        <div class="divide-y divide-slate-800 rounded-2xl border border-slate-800 overflow-hidden">
+          <% PRAYERS.forEach(function(p){ %>
+            <% var isNext = nextPrayer && !nextPrayer.isTomorrow && nextPrayer.name === p; %>
+            <% var st = statusMap[p]; %>
+            <div class="flex items-center justify-between px-5 py-4 <%= isNext ? 'bg-emerald-500/10' : '' %>">
+              <div class="flex items-center gap-3">
+                <span class="w-2 h-2 rounded-full <%= isNext ? 'bg-emerald-400' : 'bg-slate-600' %>"></span>
+                <span class="font-semibold text-white"><%= p %></span>
+                <% if (isNext) { %><span class="text-[10px] uppercase tracking-wider font-bold text-emerald-300">Next</span><% } %>
+              </div>
+              <div class="flex items-center gap-3">
+                <% if (st === 'done') { %><span class="text-emerald-400 text-sm">✓ prayed</span><% } else if (st === 'missed') { %><span class="text-red-400 text-sm">missed</span><% } %>
+                <span class="font-mono text-lg text-slate-100"><%= todayTimes[p.toLowerCase()] %></span>
+              </div>
+            </div>
+          <% }); %>
+        </div>
+        <p class="text-slate-500 text-sm mt-4 text-center">To mark a prayer, use your <a href="/dashboard" class="text-emerald-400 hover:text-emerald-300 underline">dashboard</a>.</p>
+      </div>
+    <% } %>
+
+    <!-- Tahajjud window -->
+    <% if (tahajjud) { %>
+      <div class="bg-gradient-to-br from-indigo-900/40 to-slate-900/40 border border-indigo-500/30 rounded-2xl p-6 mb-6 shadow-xl shadow-black/20">
+        <div class="flex items-center gap-2 mb-2">
+          <span class="text-2xl">&#127769;</span>
+          <h2 class="text-lg font-bold text-white">Tahajjud · last third of the night</h2>
+        </div>
+        <p class="text-slate-300 text-sm mb-3">The most blessed time for qiyam begins tonight at</p>
+        <p class="text-3xl font-bold text-indigo-200"><%= tahajjud.startLabel %> <span class="text-slate-400 text-lg font-normal">&rarr;</span> <%= tahajjud.endLabel %></p>
+        <p class="text-slate-500 text-xs mt-3">Ends at Fajr (<%= tahajjud.endLabel %>). A few rak'ah in this window are a beloved habit.</p>
+      </div>
+    <% } %>
+
+    <div class="mt-6 text-center">
+      <a href="/dashboard" class="text-slate-400 hover:text-emerald-400 transition-colors">&larr; Back to dashboard</a>
+    </div>
+
+  </div>
+
+  <%- include('components/footer', { isAdmin: false }) %>
+
+  <% if (nextPrayer) { %>
+  <script>
+    (function () {
+      var timer = document.getElementById('countdown-timer');
+      var wrap = document.getElementById('countdown-ring');
+      if (!timer || !wrap) return;
+      var ring = document.getElementById('ring-progress');
+      var target = new Date(wrap.getAttribute('data-target')).getTime();
+      var startStr = wrap.getAttribute('data-start');
+      // Without a previous-prayer anchor (e.g. before Fajr), assume a 6h window
+      // so the ring still animates sensibly toward the next prayer.
+      var start = startStr ? new Date(startStr).getTime() : (target - 6 * 3600 * 1000);
+      var CIRC = 2 * Math.PI * 104; // matches r=104
+      if (ring) ring.setAttribute('stroke-dasharray', CIRC.toFixed(2));
+
+      function render() {
+        var now = Date.now();
+        var diff = target - now;
+        if (diff <= 0) {
+          timer.textContent = 'now';
+          if (ring) ring.setAttribute('stroke-dashoffset', '0');
+          setTimeout(function () { location.reload(); }, 5000);
+          return;
+        }
+
+        var totalSeconds = Math.floor(diff / 1000);
+        var hours = Math.floor(totalSeconds / 3600);
+        var minutes = Math.floor((totalSeconds % 3600) / 60);
+        var seconds = totalSeconds % 60;
+
+        var parts = [];
+        if (hours > 0) parts.push(hours + 'h');
+        if (minutes > 0) parts.push(minutes + 'm');
+        parts.push(seconds + 's');
+        timer.textContent = parts.join(' ');
+
+        // Ring fills as we move from the previous prayer toward the next one.
+        if (ring) {
+          var span = target - start;
+          var progress = span > 0 ? (now - start) / span : 1;
+          progress = Math.max(0, Math.min(1, progress));
+          ring.setAttribute('stroke-dashoffset', (CIRC * (1 - progress)).toFixed(2));
+        }
+      }
+
+      render();
+      setInterval(render, 1000);
+    })();
+  </script>
+  <% } %>
+</body>
+</html>

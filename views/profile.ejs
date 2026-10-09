@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Your Profile — Prayer Reminder</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Noto+Naskh+Arabic:wght@400;700&display=swap" rel="stylesheet">
+  <script src="/theme.js"></script>
+    <link rel="stylesheet" href="/style.css" />
+</head>
+<body class="bg-slate-950 min-h-screen text-slate-100 antialiased" style="background-image: radial-gradient(60rem 60rem at 110% -10%, rgba(16,185,129,0.10), transparent 60%), radial-gradient(50rem 50rem at -10% 10%, rgba(99,102,241,0.10), transparent 55%);">
+  <%- include('components/navigation', { user, isAdmin: false }) %>
+  <div class="container mx-auto px-4 pt-24 pb-12 max-w-2xl">
+
+    <div class="mb-6">
+      <h1 class="text-2xl font-bold text-white mb-1">Your profile</h1>
+      <p class="text-slate-400">Update your name and location. Your city &amp; country determine the prayer times shown on your dashboard and in reminder emails.</p>
+    </div>
+
+    <% if (saved) { %>
+      <div class="bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 rounded-2xl p-4 mb-6 flex items-start gap-3">
+        <span class="text-lg leading-none mt-0.5">✓</span>
+        <div>
+          <p class="font-semibold">Profile updated.</p>
+          <p class="text-sm text-emerald-200/80">Your prayer times are being recalculated for your new location.</p>
+        </div>
+      </div>
+    <% } %>
+
+    <% if (error) { %>
+      <div class="bg-red-500/10 border border-red-500/30 text-red-300 rounded-2xl p-4 mb-6">
+        <%= error %>
+      </div>
+    <% } %>
+
+    <div class="bg-slate-900/60 backdrop-blur border border-slate-800 rounded-2xl p-6 mb-6 shadow-xl shadow-black/20">
+      <form method="POST" action="/profile" class="space-y-5">
+        <div>
+          <label class="block text-slate-300 text-sm font-medium mb-2">Full name</label>
+          <input type="text" name="name" value="<%= user.name %>" required
+                 class="w-full px-4 py-3 bg-slate-800/60 border border-slate-700 rounded-xl text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all">
+        </div>
+
+        <div>
+          <label class="block text-slate-300 text-sm font-medium mb-2">City</label>
+          <input type="text" name="city" value="<%= user.city || '' %>" required placeholder="e.g. London"
+                 class="w-full px-4 py-3 bg-slate-800/60 border border-slate-700 rounded-xl text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all">
+        </div>
+
+        <div>
+          <label class="block text-slate-300 text-sm font-medium mb-2">Country</label>
+          <input type="text" name="country" value="<%= user.country || '' %>" required placeholder="e.g. United Kingdom"
+                 class="w-full px-4 py-3 bg-slate-800/60 border border-slate-700 rounded-xl text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all">
+          <p class="text-slate-500 text-xs mt-2">Tip: write your country in full (e.g. “United Kingdom”, “Pakistan”) so we can pick the right calculation method.</p>
+        </div>
+
+        <button type="submit"
+                class="w-full py-3.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold rounded-xl shadow-lg shadow-emerald-500/20 transition-all">
+          Save changes
+        </button>
+      </form>
+    </div>
+
+    <div class="bg-slate-900/60 backdrop-blur border border-slate-800 rounded-2xl p-6 shadow-xl shadow-black/20">
+      <h2 class="text-lg font-bold text-white mb-2">Prayer time calculation</h2>
+      <p class="text-slate-400 text-sm mb-3">
+        Fajr and Isha are worked out from the sun's twilight angles, which differ by region. We automatically use the method standard for your country so your times match your local mosque.
+      </p>
+      <div class="flex items-center gap-3 text-sm">
+        <span class="text-slate-500">Current method:</span>
+        <span class="bg-emerald-500/10 text-emerald-300 ring-1 ring-inset ring-emerald-500/30 px-3 py-1 rounded-full font-semibold">
+          <%= method.name %>
+        </span>
+      </div>
+      <p class="text-slate-500 text-xs mt-4">Changing your country above updates this automatically.</p>
+    </div>
+
+    <div class="bg-slate-900/60 backdrop-blur border border-slate-800 rounded-2xl p-6 mb-6 shadow-xl shadow-black/20 flex items-center justify-between gap-4">
+      <div>
+        <h2 class="text-lg font-bold text-white mb-1">Email preferences</h2>
+        <p class="text-slate-400 text-sm">Choose which prayers we remind you about, and whether to be emailed before, after, or both.</p>
+      </div>
+      <a href="/notifications" class="shrink-0 bg-emerald-500 hover:bg-emerald-400 text-slate-950 px-4 py-2.5 rounded-xl font-semibold transition-colors whitespace-nowrap">Manage</a>
+    </div>
+
+    <div class="mt-6 text-center">
+      <a href="/dashboard" class="text-slate-400 hover:text-emerald-400 transition-colors">&larr; Back to dashboard</a>
+    </div>
+
+  </div>
+</body>
+</html>

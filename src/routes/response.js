@@ -40,6 +40,7 @@ router.get("/respond", async (req, res) => {
       // Update existing response
       await db.updateResponse(existing.id, {
         status: status,
+        mark_source: 'email',
         responded_at: new Date().toISOString()
       });
     } else {
@@ -50,17 +51,16 @@ router.get("/respond", async (req, res) => {
         prayer_name: prayerName,
         date: date,
         status: status,
+        mark_source: 'email',
         responded_at: new Date().toISOString()
       });
     }
 
-    res.render("respond_result", {
-      ok: true,
-      message:
-        status === "done"
-          ? `Marked ${prayerName} as completed for ${date}. Great job, ${user.name}!`
-          : `Marked ${prayerName} as not completed for ${date}. There's always the next one.`,
-    });
+    // Marked successfully. Per product requirement, land the user on their own
+    // dashboard (which now reflects the updated status) instead of a standalone
+    // confirmation page. If they aren't logged in, requireLogin will bounce
+    // them to the login screen first.
+    return res.redirect("/dashboard");
   } catch (error) {
     console.error(`[respond] Error:`, error);
     res.status(500).render("respond_result", { ok: false, message: "An error occurred while processing your response." });

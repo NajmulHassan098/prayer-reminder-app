@@ -1,4 +1,5 @@
 const nodemailer = require("nodemailer");
+const { siteOrigin } = require("../utils/siteUrl");
 
 let transporter = null;
 
@@ -86,7 +87,7 @@ function stripHtml(html) {
     .trim();
 }
 
-function reminderEmailHtml(user, prayerName, time) {
+function reminderEmailHtml(user, prayerName, time, leadMinutes = 30) {
   return `
     <!DOCTYPE html>
     <html>
@@ -111,10 +112,10 @@ function reminderEmailHtml(user, prayerName, time) {
           
           <div style="background-color: #f0fdf4; border-left: 4px solid #10b981; padding: 20px; margin: 24px 0; border-radius: 0 8px 8px 0;">
             <p style="color: #166534; margin: 0; font-size: 18px; font-weight: 600;">
-              <strong>${prayerName}</strong> today is at <strong>${time}</strong>
+              Be ready for ${prayerName} prayer in ${leadMinutes} minutes.
             </p>
             <p style="color: #166534; margin: 8px 0 0; font-size: 16px;">
-              in ${user.city} — get ready, it's almost time to pray.
+              ${prayerName} today is at <strong>${time}</strong> in ${user.city}.
             </p>
           </div>
           
@@ -281,7 +282,7 @@ function groupAddedEmailHtml(inviterName, groupName) {
           
           <!-- Action Button -->
           <div style="margin: 32px 0; text-align: center;">
-            <a href="${process.env.BASE_URL || 'http://localhost:3000'}/dashboard" style="display: inline-block; background-color: #06b6d4; color: #ffffff; padding: 16px 32px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 16px;">
+            <a href="${siteOrigin()}/dashboard" style="display: inline-block; background-color: #06b6d4; color: #ffffff; padding: 16px 32px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 16px;">
               Go to Dashboard
             </a>
           </div>
@@ -299,10 +300,62 @@ function groupAddedEmailHtml(inviterName, groupName) {
   `;
 }
 
+function resetPasswordEmailHtml(name, resetUrl) {
+  return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Reset your password</title>
+    </head>
+    <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc;">
+      <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff;">
+        <!-- Header -->
+        <div style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); padding: 32px 24px; text-align: center;">
+          <div style="font-size: 48px; margin-bottom: 16px;">🔑</div>
+          <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: 700;">Reset your password</h1>
+        </div>
+
+        <!-- Content -->
+        <div style="padding: 32px 24px;">
+          <p style="color: #1e293b; font-size: 16px; line-height: 1.6; margin: 0 0 16px;">
+            Assalamu Alaikum, <strong>${name || 'there'}</strong>
+          </p>
+
+          <p style="color: #64748b; font-size: 15px; line-height: 1.6; margin: 0 0 24px;">
+            We received a request to reset the password for your Prayer Reminder account. Click the button below to choose a new password. This link is valid for <strong>1 hour</strong>.
+          </p>
+
+          <!-- Action Button -->
+          <div style="margin: 32px 0; text-align: center;">
+            <a href="${resetUrl}" style="display: inline-block; background-color: #10b981; color: #ffffff; padding: 16px 32px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 16px;">
+              Reset Password
+            </a>
+          </div>
+
+          <p style="color: #94a3b8; font-size: 12px; line-height: 1.5; margin: 24px 0 0; text-align: center;">
+            If you did not request this, you can safely ignore this email and your password will not change.
+          </p>
+        </div>
+
+        <!-- Footer -->
+        <div style="background-color: #f1f5f9; padding: 24px; text-align: center; border-top: 1px solid #e2e8f0;">
+          <p style="color: #64748b; font-size: 12px; margin: 0;">
+            Prayer Reminder App · ${new Date().toLocaleDateString()}
+          </p>
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+}
+
 module.exports = { 
   sendMail, 
   reminderEmailHtml, 
   followupEmailHtml,
   invitationEmailHtml,
-  groupAddedEmailHtml
+  groupAddedEmailHtml,
+  resetPasswordEmailHtml
 };

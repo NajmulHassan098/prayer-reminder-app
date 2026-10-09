@@ -8,68 +8,35 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Noto+Naskh+Arabic:wght@400;700&display=swap" rel="stylesheet">
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          colors: {
-            primary: {
-              50: '#f0fdf4',
-              100: '#dcfce7',
-              200: '#bbf7d0',
-              300: '#86efac',
-              400: '#4ade80',
-              500: '#22c55e',
-              600: '#16a34a',
-              700: '#15803d',
-              800: '#166534',
-              900: '#14532d',
-            },
-            accent: {
-              50: '#f0f9ff',
-              100: '#e0f2fe',
-              200: '#bae6fd',
-              300: '#7dd3fc',
-              400: '#38bdf8',
-              500: '#0ea5e9',
-              600: '#0284c7',
-              700: '#0369a1',
-              800: '#075985',
-              900: '#0c4a6e',
-            }
-          },
-        },
-      },
-    }
-  </script>
-  <link rel="stylesheet" href="/style.css" />
+  <script src="/theme.js"></script>
+    <link rel="stylesheet" href="/style.css" />
 </head>
-<body class="bg-slate-50 min-h-screen">
+<body class="bg-slate-950 min-h-screen text-slate-100 antialiased" style="background-image: radial-gradient(60rem 60rem at 110% -10%, rgba(16,185,129,0.10), transparent 60%), radial-gradient(50rem 50rem at -10% 10%, rgba(99,102,241,0.10), transparent 55%);">
   <%- include('components/navigation', { isAdmin: true, user: { name: 'Admin' } }) %>
-  <div class="container mx-auto px-4 py-8 max-w-6xl">
+  <div class="container mx-auto px-4 pt-24 pb-12 max-w-6xl">
 
     <!-- Admin Header -->
-    <div class="bg-white rounded-2xl border border-slate-200 p-6 mb-6 shadow-md">
-      <h1 class="text-2xl font-bold text-slate-800 mb-3"><%= group.name %> — Admin</h1>
+    <div class="bg-slate-900/60 backdrop-blur border border-slate-800 rounded-2xl p-6 mb-6 shadow-xl shadow-black/20">
+      <h1 class="text-2xl font-bold text-white mb-3"><%= group.name %> — Admin</h1>
       <div class="flex items-center gap-4 flex-wrap">
-        <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-700">
+        <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-300 ring-1 ring-inset ring-emerald-500/30">
           <%= memberCount %>/30 members
         </span>
       </div>
     </div>
 
     <!-- Invite Members Section -->
-    <div class="bg-white rounded-2xl border border-slate-200 p-6 mb-6 shadow-md">
-      <h2 class="text-xl font-bold text-slate-800 mb-4">Invite Members</h2>
-      <div class="flex gap-3">
-        <input type="email" id="invite-email" placeholder="Enter email address" 
-               class="flex-1 px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all" />
-        <button onclick="inviteMember(false)" 
-                class="bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-3 rounded-lg font-semibold transition-colors shadow-lg shadow-emerald-200">
+    <div class="bg-slate-900/60 backdrop-blur border border-slate-800 rounded-2xl p-6 mb-6 shadow-xl shadow-black/20">
+      <h2 class="text-xl font-bold text-white mb-4">Invite Members</h2>
+      <div class="flex gap-3 flex-wrap sm:flex-nowrap">
+        <input type="email" id="invite-email" placeholder="Enter email address"
+               class="flex-1 min-w-[200px] px-4 py-3 bg-slate-800/60 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all" />
+        <button onclick="inviteMember(false)"
+                class="bg-emerald-500 hover:bg-emerald-400 text-slate-950 px-6 py-3 rounded-xl font-semibold transition-colors shadow-lg shadow-emerald-500/20">
           Send Invite
         </button>
-        <button onclick="inviteMember(true)" 
-                class="bg-slate-600 hover:bg-slate-700 text-white px-6 py-3 rounded-lg font-semibold transition-colors shadow-lg">
+        <button onclick="inviteMember(true)"
+                class="bg-slate-700 hover:bg-slate-600 text-white px-6 py-3 rounded-xl font-semibold transition-colors ring-1 ring-inset ring-slate-600">
           Resend
         </button>
       </div>
@@ -77,15 +44,15 @@
     </div>
 
     <!-- Today's Completion Summary -->
-    <div class="bg-white rounded-2xl border border-slate-200 p-6 mb-6 shadow-lg">
-      <h2 class="text-xl font-bold text-slate-800 mb-6">Today's completion (<%= date %>)</h2>
+    <div class="bg-slate-900/60 backdrop-blur border border-slate-800 rounded-2xl p-6 mb-6 shadow-xl shadow-black/20">
+      <h2 class="text-xl font-bold text-white mb-6">Today's completion (<%= date %>)</h2>
       <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
         <% prayerSummary.forEach(function(s) { %>
-          <div class="bg-gradient-to-br from-slate-50 to-slate-100 rounded-2xl border border-slate-200 p-5 text-center shadow-sm hover:shadow-md transition-shadow">
-            <div class="font-bold text-emerald-700 text-sm mb-2 uppercase tracking-wide"><%= s.name %></div>
-            <div class="text-3xl font-bold text-slate-800 mb-2"><%= s.done %>/<%= s.total %></div>
-            <div class="text-xs text-slate-500 font-medium">
-              completed<% if (s.missed > 0) { %> · <span class="text-red-500"><%= s.missed %> missed</span><% } %>
+          <div class="bg-slate-800/50 rounded-2xl border border-slate-700/60 p-5 text-center transition-all hover:border-emerald-500/40 hover:bg-slate-800/80">
+            <div class="font-bold text-emerald-400 text-sm mb-2 uppercase tracking-wide"><%= s.name %></div>
+            <div class="text-3xl font-bold text-white mb-2"><%= s.done %>/<%= s.total %></div>
+            <div class="text-xs text-slate-400 font-medium">
+              completed<% if (s.missed > 0) { %> · <span class="text-red-400"><%= s.missed %> missed</span><% } %>
             </div>
           </div>
         <% }); %>
@@ -93,55 +60,55 @@
     </div>
 
     <!-- Members Table -->
-    <div class="bg-white rounded-2xl border border-slate-200 p-6 shadow-lg">
-      <h2 class="text-xl font-bold text-slate-800 mb-6">Members</h2>
-      <div class="overflow-x-auto rounded-xl border border-slate-200">
-        <table class="w-full">
+    <div class="bg-slate-900/60 backdrop-blur border border-slate-800 rounded-2xl p-6 shadow-xl shadow-black/20">
+      <h2 class="text-xl font-bold text-white mb-6">Members</h2>
+      <div class="overflow-x-auto rounded-2xl border border-slate-800">
+        <table class="w-full text-sm">
           <thead>
-            <tr class="bg-slate-50 border-b border-slate-200">
-              <th class="text-left py-4 px-4 text-sm font-semibold text-slate-600">Member</th>
-              <% PRAYERS.forEach(function(p) { %><th class="text-center py-4 px-2 text-sm font-semibold text-slate-600"><%= p %></th><% }); %>
-              <th class="text-center py-4 px-4 text-sm font-semibold text-slate-600">All-time %</th>
-              <th class="text-right py-4 px-4 text-sm font-semibold text-slate-600">Actions</th>
+            <tr class="bg-slate-800/60">
+              <th class="px-5 py-4 text-left text-xs font-semibold uppercase tracking-wider text-slate-400">Member</th>
+              <% PRAYERS.forEach(function(p) { %><th class="px-2 py-4 text-center text-xs font-semibold uppercase tracking-wider text-slate-400"><%= p %></th><% }); %>
+              <th class="px-4 py-4 text-center text-xs font-semibold uppercase tracking-wider text-slate-400">All-time %</th>
+              <th class="px-5 py-4 text-right text-xs font-semibold uppercase tracking-wider text-slate-400">Actions</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody class="divide-y divide-slate-800">
             <% rows.forEach(function(row) { %>
-              <tr class="border-b border-slate-100 hover:bg-slate-50 transition-colors">
-                <td class="py-4 px-4">
-                  <a href="/admin/member/<%= row.member.id %>" class="font-semibold text-slate-800 hover:text-emerald-600 transition-colors"><%= row.member.name %></a>
+              <tr class="transition-colors hover:bg-slate-800/40">
+                <td class="px-5 py-4">
+                  <a href="/admin/member/<%= row.member.id %>" class="font-semibold text-white hover:text-emerald-400 transition-colors"><%= row.member.name %></a>
                   <br/>
-                  <span class="text-sm text-slate-500"><%= row.member.email %></span>
+                  <span class="text-xs text-slate-500"><%= row.member.email %></span>
                 </td>
                 <% PRAYERS.forEach(function(p) { %>
-                  <td class="py-4 px-2 text-center">
+                  <td class="px-2 py-4 text-center">
                     <% var st = row.statusMap[p] || 'none'; %>
                     <% if (st === 'done') { %>
-                      <span class="inline-flex items-center px-3 py-1.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-700 hover:bg-emerald-200 transition-colors">
-                        <span class="mr-2">✓</span> Done
+                      <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-300 ring-1 ring-inset ring-emerald-500/30">
+                        <span class="mr-1.5">✓</span> Done
                       </span>
                     <% } else if (st === 'missed') { %>
-                      <span class="inline-flex items-center px-3 py-1.5 rounded-full text-xs font-bold bg-red-100 text-red-700 hover:bg-red-200 transition-colors">
-                        <span class="mr-2">✗</span> Missed
+                      <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-red-500/10 text-red-300 ring-1 ring-inset ring-red-500/30">
+                        <span class="mr-1.5">✗</span> Missed
                       </span>
                     <% } else if (st === 'pending') { %>
-                      <span class="inline-flex items-center px-3 py-1.5 rounded-full text-xs font-bold bg-amber-100 text-amber-700 hover:bg-amber-200 transition-colors">
-                        <span class="mr-2">○</span> Pending
+                      <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-amber-500/10 text-amber-300 ring-1 ring-inset ring-amber-500/30">
+                        <span class="mr-1.5">○</span> Pending
                       </span>
                     <% } else { %>
-                      <span class="inline-flex items-center px-3 py-1.5 rounded-full text-xs font-bold bg-slate-200 text-slate-600 hover:bg-slate-300 transition-colors">
-                        <span class="mr-2">○</span> —
+                      <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-slate-500/10 text-slate-400 ring-1 ring-inset ring-slate-500/30">
+                        <span class="mr-1.5">○</span> —
                       </span>
                     <% } %>
                   </td>
                 <% }); %>
-                <td class="py-4 px-4 text-center font-semibold text-slate-700">
+                <td class="px-4 py-4 text-center font-semibold text-emerald-400">
                   <%= row.pct === null ? '—' : row.pct + '%' %>
                 </td>
-                <td class="py-4 px-4 text-right whitespace-nowrap">
-                  <a href="/admin/member/<%= row.member.id %>" class="inline-block bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg text-xs font-semibold transition-colors mr-2">Inspect</a>
+                <td class="px-5 py-4 text-right whitespace-nowrap">
+                  <a href="/admin/member/<%= row.member.id %>" class="inline-block bg-slate-700/60 hover:bg-slate-600 text-slate-200 px-4 py-2 rounded-lg text-xs font-semibold transition-colors mr-2">Inspect</a>
                   <form method="POST" action="/group/remove-member/<%= row.member.id %>" onsubmit="return confirm('Remove this member from the group?');" class="inline">
-                    <button type="submit" class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg text-xs font-semibold transition-colors">Remove</button>
+                    <button type="submit" class="bg-red-500/90 hover:bg-red-500 text-white px-4 py-2 rounded-lg text-xs font-semibold transition-colors">Remove</button>
                   </form>
                 </td>
               </tr>
@@ -158,12 +125,12 @@
       const emailInput = document.getElementById('invite-email');
       const messageDiv = document.getElementById('invite-message');
       const email = emailInput.value.trim();
-      
+
       if (!email) {
         showMessage('Please enter an email address', 'error');
         return;
       }
-      
+
       try {
         const response = await fetch('/group/invite', {
           method: 'POST',
@@ -172,9 +139,9 @@
           },
           body: JSON.stringify({ email, resend }),
         });
-        
+
         const data = await response.json();
-        
+
         if (data.success) {
           showMessage(data.message, 'success');
           if (!resend) {
@@ -187,13 +154,13 @@
         showMessage('Failed to send invitation. Please try again.', 'error');
       }
     }
-    
+
     function showMessage(message, type) {
       const messageDiv = document.getElementById('invite-message');
       messageDiv.textContent = message;
-      messageDiv.className = 'mt-3 text-sm ' + (type === 'success' ? 'text-emerald-600' : 'text-red-600');
+      messageDiv.className = 'mt-3 text-sm ' + (type === 'success' ? 'text-emerald-400' : 'text-red-400');
       messageDiv.classList.remove('hidden');
-      
+
       setTimeout(() => {
         messageDiv.classList.add('hidden');
       }, 5000);
