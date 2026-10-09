@@ -222,3 +222,22 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE INDEX IF NOT EXISTS idx_sessions_expire ON sessions(expire);
 
 ALTER TABLE sessions ENABLE ROW LEVEL SECURITY;
+
+-- Cron heartbeat (migration 0007): a single-row record proving the scheduler
+-- is actually firing in production. Written by every tick, read by GET
+-- /api/health. Service-role only — RLS is on with no policies, matching the
+-- sessions table above.
+CREATE TABLE IF NOT EXISTS cron_heartbeat (
+  id                     INT PRIMARY KEY DEFAULT 1,
+  last_started_at        TIMESTAMP WITH TIME ZONE,
+  last_finished_at       TIMESTAMP WITH TIME ZONE,
+  last_error             TEXT,
+  users_seen             INT NOT NULL DEFAULT 0,
+  emails_sent            INT NOT NULL DEFAULT 0,
+  emails_skipped_stale   INT NOT NULL DEFAULT 0,
+  dry_run                BOOLEAN NOT NULL DEFAULT FALSE,
+  updated_at             TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+  CONSTRAINT cron_heartbeat_singleton CHECK (id = 1)
+);
+
+ALTER TABLE cron_heartbeat ENABLE ROW LEVEL SECURITY;

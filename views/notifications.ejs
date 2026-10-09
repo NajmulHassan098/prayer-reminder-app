@@ -43,18 +43,32 @@
         <label class="flex items-start gap-3 py-2 cursor-pointer">
           <input type="checkbox" name="pre" <%= prefs.pre ? 'checked' : '' %>
                  class="mt-1 w-5 h-5 rounded bg-slate-800 border-slate-600 text-emerald-500 focus:ring-emerald-500 focus:ring-2">
-          <span>
+          <span class="flex-1">
             <span class="block text-slate-100 font-medium">Before prayer — “time to prepare”</span>
             <span class="block text-slate-400 text-sm">Sent a few minutes ahead of each prayer you've enabled below.</span>
+            <span class="mt-2 flex items-center gap-2 text-sm">
+              <label for="pre_minutes" class="text-slate-400">How many minutes before?</label>
+              <input id="pre_minutes" type="number" name="pre_minutes" min="5" max="120" step="5"
+                     value="<%= prefs.preMinutes %>"
+                     class="w-20 px-2 py-1 rounded-lg bg-slate-800 border border-slate-600 text-slate-100 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500">
+              <span class="text-slate-500">(default 30, allowed 5–120)</span>
+            </span>
           </span>
         </label>
 
         <label class="flex items-start gap-3 py-2 cursor-pointer border-t border-slate-800 mt-2 pt-4">
           <input type="checkbox" name="post" <%= prefs.post ? 'checked' : '' %>
                  class="mt-1 w-5 h-5 rounded bg-slate-800 border-slate-600 text-emerald-500 focus:ring-emerald-500 focus:ring-2">
-          <span>
+          <span class="flex-1">
             <span class="block text-slate-100 font-medium">After prayer — “did you pray?” check-in</span>
-            <span class="block text-slate-400 text-sm">Sent a little while after the prayer with a one-tap yes / no.</span>
+            <span class="block text-slate-400 text-sm">Sent a little while after the prayer with a one-tap yes / no. Skipped automatically if you already logged the prayer.</span>
+            <span class="mt-2 flex items-center gap-2 text-sm">
+              <label for="post_minutes" class="text-slate-400">How many minutes after?</label>
+              <input id="post_minutes" type="number" name="post_minutes" min="5" max="120" step="5"
+                     value="<%= prefs.postMinutes %>"
+                     class="w-20 px-2 py-1 rounded-lg bg-slate-800 border border-slate-600 text-slate-100 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500">
+              <span class="text-slate-500">(default 30, allowed 5–120)</span>
+            </span>
           </span>
         </label>
       </div>

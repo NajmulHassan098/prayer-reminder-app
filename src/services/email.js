@@ -66,6 +66,15 @@ async function sendMail({ to, subject, html, text }) {
       subject,
       html,
       text: text || stripHtml(html), // Fallback plain text version
+      // RFC 8058 one-click unsubscribe. Gmail/Outlook/Yahoo surface this as a
+      // visible Unsubscribe button and enforce it since Feb 2024 — omitting it
+      // is now a deliverability risk on bulk mail. The URL points at the
+      // existing /notifications page where the user can toggle every email
+      // type off; no dedicated route needed.
+      headers: {
+        "List-Unsubscribe": `<${siteOrigin()}/notifications>`,
+        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+      },
     });
     
     console.log(`[email] Successfully sent to ${to}: ${subject} (Message ID: ${result.messageId})`);
@@ -149,7 +158,7 @@ function reminderEmailHtml(user, prayerName, time, leadMinutes = 30) {
   `;
 }
 
-function followupEmailHtml(user, prayerName, date, yesUrl, noUrl) {
+function followupEmailHtml(user, prayerName, date, yesUrl, noUrl, postMinutes = 30) {
   const loc = emailLocale(user);
   const dir = dirAttr(loc);
   const question = t(loc, "email.subject.followup", { prayer: prayerName });
@@ -177,6 +186,10 @@ function followupEmailHtml(user, prayerName, date, yesUrl, noUrl) {
           
           <p style="color: #64748b; font-size: 15px; line-height: 1.6; margin: 0 0 24px;">
             ${t(loc, "email.followup_nudge")} <strong>${date}</strong>.
+          </p>
+
+          <p style="color: #64748b; font-size: 15px; line-height: 1.6; margin: 0 0 24px;">
+            ${t(loc, "email.followup.still_time", { prayer: prayerName, mins: postMinutes })}
           </p>
           
           <!-- Action Buttons -->

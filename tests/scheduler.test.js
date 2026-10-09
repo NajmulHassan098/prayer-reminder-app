@@ -194,3 +194,56 @@ test("Two emails due in one tick → later scheduledAt is sent, older marked ski
   assert.strictEqual(dhuhrFu.reason, "tick-cap-older-due");
   assert.strictEqual(acts.filter((a) => a.action === "send").length, 1);
 });
+
+// ---- Per-user pre/post offsets (product Problem 2) ---------------------------
+// The plan's Section G unit tests: buildDayPlan honors a user's preMinutes /
+// postMinutes, missing prefs fall back to 30/30, and the clamp keeps a big
+// lead from stacking on top of the previous prayer.
+test("buildDayPlan(row, prefs) honors preMinutes=15 and postMinutes=45", () => {
+  const prefs = { preMinutes: 15, postMinutes: 45 };
+  const plan = buildDayPlan(ROW, prefs);
+  const asr = plan.find((e) => e.name === "Asr"); // 16:00 PKT = 11:00 UTC
+  // preAt = 15:45 PKT = 10:45 UTC (was 15:30 with default 30)
+  assert.strictEqual(asr.preAt.toISOString(), "2026-10-09T10:45:00.000Z");
+  // postAt = 16:45 PKT = 11:45 UTC (was 16:30 with default 30)
+  assert.strictEqual(asr.postAt.toISOString(), "2026-10-09T11:45:00.000Z");
+  // Auto-mark cutoff is still min(prayer+120, next-5), independent of postMin.
+  // Asr 16:00 + 120 = 18:00 PKT (byFixed) beats Maghrib 18:15 − 5 = 18:10 PKT.
+  assert.strictEqual(asr.cutoff.toISOString(), "2026-10-09T13:00:00.000Z");
+});
+
+test("buildDayPlan with no prefs / partial prefs → defaults 30/30 (backward-compat)", () => {
+  const a = buildDayPlan(ROW);
+  const b = buildDayPlan(ROW, {}); // empty object → NaN preMinutes/postMinutes
+  const c = buildDayPlan(ROW, { preMinutes: 20 }); // partial: postMin defaults
+  const pick = (plan) => {
+    const asr = plan.find((e) => e.name === "Asr");
+    return [asr.preAt.toISOString(), asr.postAt.toISOString()];
+  };
+  assert.deepStrictEqual(pick(a), ["2026-10-09T10:30:00.000Z", "2026-10-09T11:30:00.000Z"]);
+  assert.deepStrictEqual(pick(b), pick(a));
+  // Only the pre side honors the override; post stays at default 30.
+  assert.deepStrictEqual(pick(c), ["2026-10-09T10:40:00.000Z", "2026-10-09T11:30:00.000Z"]);
+});
+
+test("buildDayPlan clamps a huge preMinutes lead to prev.at + 1 min (no stacking)", () => {
+  // Asr 16:00, Maghrib 18:15 (135-min gap). A 150-min pre lead on Maghrib would
+  // target 15:45 PKT, which is before Asr has even finished. The clamp must push
+  // it to Asr.at + 1 = 16:01 PKT so two reminders never stack.
+  const plan = buildDayPlan(ROW, { preMinutes: 150, postMinutes: 30 });
+  const maghrib = plan.find((e) => e.name === "Maghrib");
+  assert.strictEqual(maghrib.preAt.toISOString(), "2026-10-09T11:01:00.000Z"); // 16:01 PKT
+});
+
+test("notifPrefsOf clamps out-of-range / non-numeric preMinutes & postMinutes to 30", () => {
+  assert.strictEqual(notifPrefsOf({ notification_prefs: { preMinutes: 0 } }).preMinutes, 30);
+  assert.strictEqual(notifPrefsOf({ notification_prefs: { preMinutes: 200 } }).preMinutes, 30);
+  assert.strictEqual(notifPrefsOf({ notification_prefs: { preMinutes: "abc" } }).preMinutes, 30);
+  assert.strictEqual(notifPrefsOf({ notification_prefs: { postMinutes: null } }).postMinutes, 30);
+  // In-range values are rounded and preserved.
+  assert.strictEqual(notifPrefsOf({ notification_prefs: { preMinutes: 15 } }).preMinutes, 15);
+  assert.strictEqual(notifPrefsOf({ notification_prefs: { preMinutes: 45.6 } }).preMinutes, 46);
+  // Missing blob entirely → defaults.
+  assert.strictEqual(notifPrefsOf({}).preMinutes, 30);
+  assert.strictEqual(notifPrefsOf({}).postMinutes, 30);
+});

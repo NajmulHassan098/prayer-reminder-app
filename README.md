@@ -15,12 +15,13 @@ A group-based prayer-time reminder and tracking app, deployed on **Vercel** with
   needs to be updated by hand.
 - On a repeating schedule (every 5 minutes), a scheduler checks each user's own
   local prayer times and sends **two emails per prayer — one before, one after**:
-  1. **Before the prayer:** a "time to prepare" reminder (default: ~15 minutes
-     ahead of the prayer time).
-  2. **After the prayer:** a **"Did you pray?"** follow-up (default: 45 minutes
-     later) with signed **Yes / No** links.
+  1. **Before the prayer:** a "time to prepare" reminder (default: 30 minutes
+     ahead of the prayer time; each user can pick 5–120 on `/notifications`).
+  2. **After the prayer:** a **"Did you get to pray?"** follow-up (default: 30
+     minutes later, also per-user configurable) with signed **Yes / No** links.
+     It is skipped automatically if the user already logged that prayer.
   3. Auto-marks a prayer **"missed"** if there's still no response after a set
-     window (default: 3 hours).
+     window (default: 2 hours, always cleared before the next prayer).
 - **Admin dashboard**: the group creator sees every member's status for each of
   the 5 daily prayers, an all-time completion percentage, a per-prayer "today"
   summary (e.g. "Fajr: 8/12 completed"), and can invite or remove members or
@@ -53,8 +54,12 @@ any request. Two consequences are already handled in this codebase:
    time a request hit a fresh/cold instance. The DB-backed store means your login
    persists across cold starts and redeploys.
 2. **The scheduler cannot be an in-process `node-cron` loop**, because a
-   serverless function doesn't stay running. Instead an external timer calls the
-   `POST /api/cron/prayer-scheduler` endpoint on a schedule (see below).
+   serverless function exits before any timer callback fires. An earlier version
+   started `scheduler.start()` inside the web process; that path has been
+   **removed**. The scheduler now runs only when an external timer calls
+   `POST /api/cron/prayer-scheduler` (see [Cron & reminders](#cron--reminders)),
+   and every successful tick writes a `cron_heartbeat` row that
+   `GET /api/health` reports so you can prove it is alive.
 
 ## 1. Install
 
@@ -108,10 +113,14 @@ Copy `.env.example` to `.env` and fill in real values:
 | `SUPABASE_URL` / `SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY` | From step 2. |
 | `PRAYER_CALC_METHOD` | Aladhan method id (default `1` = Karachi). |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_SECURE` / `SMTP_USER` / `SMTP_PASS` / `EMAIL_FROM` | SMTP credentials for sending email. |
-| `PRE_REMINDER_MINUTES` | Minutes **before** a prayer to send the "time to prepare" reminder (default 15). |
-| `FOLLOWUP_DELAY_MINUTES` | Minutes **after** a prayer before the "Did you pray?" follow-up (default 45). |
-| `MISSED_AFTER_MINUTES` | Minutes after a prayer before it's auto-marked missed (default 180). |
+| `PRE_REMINDER_MINUTES` | Default minutes **before** a prayer for the "time to prepare" reminder (default 30; per-user override wins). |
+| `FOLLOWUP_DELAY_MINUTES` | Default minutes **after** a prayer for the "Did you get to pray?" follow-up (default 30; per-user override wins). |
+| `MISSED_AFTER_MINUTES` | Minutes after a prayer before it's auto-marked missed (default 120). |
+| `SEND_GRACE_MINUTES` | Width of each email's send window in minutes (default 15). A stale email is logged `skipped_stale` and never caught up. |
+| `MAX_EMAILS_PER_TICK` | Hard cap on real emails sent by one invocation (default 50). Claims past the cap are released for the next tick. |
+| `SCHEDULER_DRY_RUN` | `1`/`true`: exercise the whole claim→log→auto-mark pipeline **without** touching SMTP. |
 | `CRON_SECRET` | Shared secret that authorizes the scheduler endpoint. **Must be set in production.** |
+| `SMOKE_TEST_EMAIL` | Recipient for `npm run smoke-reminder` (ops-only, one manual test email). |
 
 Generate a secret with:
 
@@ -129,9 +138,14 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 npm run dev     # or: npm start
 ```
 
-Visit `http://localhost:3000` (or the `PORT` you set). Locally, if `CRON_SECRET`
-is unset, the app starts an **internal `node-cron` scheduler** that ticks every 5
-minutes, so you can watch reminders fire without configuring external cron.
+Visit `http://localhost:3000` (or the `PORT` you set). The web process **no
+longer self-schedules** (that in-process `node-cron` path was removed, because it
+never worked on Vercel). To trigger a reminder pass locally, run one tick by hand:
+
+```bash
+npm run tick-once                       # one live tick (sends real email if SMTP is set)
+SCHEDULER_DRY_RUN=1 npm run tick-once   # one dry-run tick: logs subjects, sends nothing
+```
 
 ## 5. Try it out
 
@@ -141,43 +155,68 @@ minutes, so you can watch reminders fire without configuring external cron.
    auto-joins the group when they register; existing members are tracked right
    away.
 4. Open `/admin` (visible only to the group creator) to see everyone's status.
-5. To test reminders quickly, temporarily lower `FOLLOWUP_DELAY_MINUTES` and let
-   the local 5-minute scheduler tick run.
+5. To test reminders quickly, set `PRE_REMINDER_MINUTES`/`FOLLOWUP_DELAY_MINUTES`
+   to a small value (or use the per-user minutes field on `/notifications`) and
+   run `npm run tick-once` near the target instant.
 
 ## Cron & reminders
 
 The scheduler logic is in [`src/services/scheduler.js`](src/services/scheduler.js).
-Each **tick** runs `tick()`, which looks at narrow time windows (a prayer reminder
-fires within ~10 minutes after its time; the follow-up within ~10 minutes of its
-delay). That means **the tick must run at least every 5 minutes** or reminders
-will be missed. Pick one (or both) of the following:
+Each **tick** runs `tick()`, which fires an email only inside a narrow window
+(`scheduled_at ≤ now < scheduled_at + SEND_GRACE_MINUTES`, default 15 min). An
+email whose window has closed is permanently logged `skipped_stale` and never
+caught up, so downtime can never stack late reminders on top of the next prayer.
+**The tick must run at least every 5 minutes** or emails fall outside the window.
+The app never self-schedules; pick an external trigger:
 
-### Option A — Vercel Cron (`vercel.json`)
-`vercel.json` registers a cron that hits `/api/cron/prayer-scheduler`:
-```json
-"crons": [{ "path": "/api/cron/prayer-scheduler", "schedule": "0 0 * * *" }]
-```
-> **Plan limit:** Vercel's **Hobby** plan only allows cron jobs **once per day**
-> (a `*/5` schedule makes the deploy fail with "Hobby accounts are limited to
-> daily cron jobs"), so the committed schedule is daily — it serves as a
-> once-a-day refresh fallback only. For on-time reminders on Hobby, enable
-> Option B. Upgrade to **Pro** if you want Vercel itself to run every 5 minutes
-> (change the schedule back to `*/5 * * * *`).
-
-Vercel automatically sends `Authorization: Bearer <CRON_SECRET>` on cron
-requests **when a `CRON_SECRET` environment variable is set** on the project — so
-set `CRON_SECRET` in Vercel's env settings.
-
-### Option B — GitHub Action (works on any plan)
+### Option B — GitHub Action (primary; works on every plan)
 [`.github/workflows/run-scheduler.yml`](.github/workflows/run-scheduler.yml)
-calls the same endpoint every 5 minutes. Add two repository secrets:
+calls the endpoint every 5 minutes and then curls `/api/health` to prove the tick
+landed. Add two repository secrets
+(**Settings → Secrets and variables → Actions**):
 - `CRON_URL` = `https://your-app.vercel.app/api/cron/prayer-scheduler`
 - `CRON_SECRET` = the same value set on Vercel.
 
+The workflow fails loudly (`::error::`) when `staleFor > 900` seconds, which
+turns every Action run into a heartbeat alarm.
+
+### Option A — Vercel Cron (daily backstop)
+`vercel.json` registers a once-per-day cron that hits
+`/api/cron/prayer-scheduler`:
+```json
+"crons": [{ "path": "/api/cron/prayer-scheduler", "schedule": "0 3 * * *" }]
+```
+> **Plan limit:** Vercel **Hobby** only allows cron **once per day** (a `*/5`
+> schedule fails the deploy). `0 3 * * *` runs in a low-traffic UTC hour and
+> serves as a refresh backstop only. On **Pro**, change it to `*/5 * * * *` and
+> the GitHub Action becomes optional redundancy. Vercel automatically sends
+> `Authorization: Bearer <CRON_SECRET>` when `CRON_SECRET` is set on the project.
+
+### `GET /api/health` (no auth)
+Returns whether the scheduler is alive and which way it is configured:
+```json
+{
+  "ok": true,
+  "scheduler": { "present": true, "lastTickAt": "…", "lastFinishedOk": true,
+                 "lastError": null, "usersSeen": 12, "emailsSent": 3,
+                 "staleFor": 143, "dryRun": false },
+  "env": { "hasSmtp": true, "hasCronSecret": true, "hasSupabaseUrl": true, "vercel": true },
+  "emailMode": "live"
+}
+```
+`staleFor` is seconds since the last tick started. Alert if it exceeds ~900.
+
 ### How the endpoint is secured
-Both `src/server.js` (the route) and the handler reject requests unless the
-`Authorization: Bearer` token matches `CRON_SECRET`, so only your scheduler can
-trigger it.
+`POST /api/cron/prayer-scheduler` rejects any request unless the
+`Authorization: Bearer` token matches `CRON_SECRET`. A missing `CRON_SECRET` in
+production is a **loud 401 failure**, not an open door. Each hit also logs
+`[cron] hit ua=…` so ops can confirm the endpoint is being reached at all.
+
+### Manual smoke test
+After deploying, `npm run smoke-reminder` sends one pre-reminder and one
+follow-up to `SMOKE_TEST_EMAIL` through the real SMTP pipeline (bypassing
+`notifications_log`), so you can verify deliverability without waiting for a
+prayer window.
 
 ## Deploying to Vercel
 
@@ -185,34 +224,66 @@ trigger it.
    `builds`/`routes` send all traffic to `src/server.js`).
 2. Add all environment variables from step 3 in **Project → Settings →
    Environment Variables**, including a real `CRON_SECRET` and `BASE_URL` set to
-   your Vercel domain.
-3. Make sure the `sessions` table exists in Supabase (step 2) or logins will not
-   persist.
-4. Deploy. Outbound HTTPS to `api.aladhan.com` must be allowed for prayer times
-   to load.
+   your Vercel domain. At minimum the Production environment needs:
+   `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY`,
+   `SESSION_SECRET`, `TOKEN_SECRET`, `BASE_URL`, `CRON_SECRET`,
+   `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `EMAIL_FROM`.
+3. Apply the Supabase migrations (see [`SUPABASE_DEPLOYMENT.md`](SUPABASE_DEPLOYMENT.md)),
+   including `0007_cron_heartbeat.sql`, so the heartbeat write and the sessions
+   /prefs columns exist. Without `0007` the scheduler still runs but
+   `/api/health` reports `scheduler.present = false`.
+4. Enable the GitHub Action: add the `CRON_URL` / `CRON_SECRET` repository
+   secrets described above.
+5. Deploy, wait for one Action run, then open
+   `https://your-app.vercel.app/api/health` and confirm
+   `scheduler.lastFinishedOk = true` and `staleFor < 900`.
+
+## Email deliverability (SPF / DKIM / DMARC)
+
+If the scheduler is firing (health looks fresh) but reminders land in spam, the
+problem is authentication, not code. Every reminder now carries an RFC 8058
+`List-Unsubscribe` / `List-Unsubscribe-Post` header pointing at `/notifications`.
+On top of that, make sure the domain used in `EMAIL_FROM` publishes:
+
+- **SPF** — a TXT record authorising your SMTP provider. E.g. Google Workspace:
+  `v=spf1 include:_spf.google.com ~all`; SendGrid/Mailgun/Resend: their documented
+  `include:`.
+- **DKIM** — the CNAME/TXT keys your provider gives you (Google: Admin console →
+  Gmail → Authenticate mail; transactional providers: verify the domain).
+- **DMARC** — at minimum `v=DMARC1; p=none; rua=mailto:you@yourdomain` while you
+  watch reports, then tighten to `p=quarantine` / `p=reject`.
+
+Do **not** send from a `@gmail.com` "send as" address on a shared relay — you
+cannot publish SPF/DKIM for a domain you do not control, and deliverability will
+stay poor. Use `npm run smoke-reminder` after any DNS change to check with a real
+message. (Exact records differ per provider; consult your `SMTP_HOST` docs.)
 
 ## Project structure
 
 ```
 src/
-  server.js               → Express app, session setup, cron endpoint (Vercel entry)
+  server.js               → Express app, session setup, cron endpoint + GET /api/health
   sessionStore.js         → Supabase-backed express-session store (serverless logins)
   supabase.js             → Supabase clients (anon + service-role)
-  db.js                   → data layer (uses the service-role client)
+  db.js                   → data layer (uses the service-role client) + cron_heartbeat helpers
   middleware/auth.js      → login / admin guards
   routes/
     auth.js               → register / login / logout
     group.js              → create group, invite/leave/remove members
     dashboard.js          → member dashboard + admin dashboard + manual marking
+    profile.js            → /notifications prefs incl. per-user pre/post minutes
     response.js           → handles the Yes/No email links
   services/
     prayerTimes.js        → Aladhan API integration + per-day caching
-    scheduler.js          → reminder / follow-up / auto-missed tick
-    email.js              → SMTP sending + email templates
+    scheduler.js          → reminder / follow-up / auto-missed tick (no self-scheduling)
+    email.js              → SMTP sending + email templates + List-Unsubscribe headers
   utils/token.js          → signed tokens for the Yes/No email links
-api/cron.js               → (legacy) standalone cron handler, superseded by the
-                            route in src/server.js
-supabase/schema.sql       → all tables, indexes, RLS policies, sessions table
+scripts/
+  tick-once.js            → run one scheduler tick by hand (replaces the old node-cron)
+  smoke-reminder.js       → send one real test email via the production pipeline
+supabase/
+  schema.sql              → all tables, indexes, RLS policies, sessions + cron_heartbeat
+  migrations/             → incremental migrations (0007 adds cron_heartbeat)
 views/                    → EJS page templates
 public/style.css          → styling
 ```

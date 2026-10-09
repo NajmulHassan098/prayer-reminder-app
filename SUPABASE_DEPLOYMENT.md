@@ -47,10 +47,45 @@ ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS notification_prefs JSONB;
 ALTER TABLE responses     ADD COLUMN IF NOT EXISTS mark_source        TEXT;
 ```
 
-- `user_profiles.notification_prefs` — per-user email opt-ins (`{ prayers, pre, post }`). `NULL` means all reminders enabled.
+- `user_profiles.notification_prefs` — per-user email opt-ins (`{ prayers, pre, post, preMinutes, postMinutes }`). `NULL` means all reminders enabled at the 30/30 defaults.
 - `responses.mark_source` — who/what set a status (`manual` | `email` | `auto`), so an auto-marked "missed" is distinguishable from a user tap. Powers the "Missed · auto" badge.
 
 No app restart is needed after running them — the columns are read live.
+
+### Step 1c: migrations `0005`, `0006`, `0007` (reminder reliability)
+
+The production database is behind the code on three migrations. Apply them in the
+SQL Editor (each file in `supabase/migrations/` is idempotent):
+
+- **`0005_user_locale.sql`** — `user_profiles.locale` (explicit language choice).
+  Missing it produces a `[db] user_profiles.locale missing` warning in the log.
+- **`0006_user_settings.sql`** — user settings columns. Same degrade-and-retry
+  warning when absent.
+- **`0007_cron_heartbeat.sql`** — creates the single-row `cron_heartbeat` table
+  that `tick()` upserts in its `finally` block and `GET /api/health` reads. The
+  scheduler runs without it, but `/api/health` reports `scheduler.present =
+  false` and ops lose the alive-signal.
+
+```sql
+-- equivalent of 0007_cron_heartbeat.sql, if you prefer to paste inline:
+CREATE TABLE IF NOT EXISTS cron_heartbeat (
+  id INT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+  last_started_at TIMESTAMPTZ,
+  last_finished_at TIMESTAMPTZ,
+  last_error TEXT,
+  users_seen INT,
+  emails_sent INT,
+  emails_skipped_stale INT,
+  dry_run BOOLEAN,
+  updated_at TIMESTAMPTZ
+);
+ALTER TABLE cron_heartbeat ENABLE ROW LEVEL SECURITY;
+-- service-role only: no policies are added, so anon/authenticated cannot read it.
+```
+
+Apply `0005` and `0006` at the **same time** as `0007`. The `mark_source` /
+degrade-and-retry paths in `src/db.js` tolerate either state, so there is no
+rollback risk.
 
 ## Step 2: Configure Environment Variables
 
@@ -130,38 +165,37 @@ pm2 save
    - Configure SMTP settings
    - Test email sending functionality
 
-## Step 7: Configure Cron Jobs
+## Step 7: Configure the Scheduler Trigger
 
-### Development Mode
-The internal node-cron scheduler runs every 5 minutes automatically.
+The web process **never self-schedules** — an earlier in-process `node-cron`
+(`scheduler.start()`) was removed because serverless functions exit before the
+timer fires. The scheduler only runs when something external calls
+`POST /api/cron/prayer-scheduler` with `Authorization: Bearer <CRON_SECRET>`.
 
-### Production Mode
-For production, use external cron services:
-
-#### Using Render Cron Jobs
-1. Deploy web service to Render
-2. Add a cron job in Render dashboard
-3. Set schedule to `*/5 * * * *`
-4. Set command to `npm run cron`
-
-#### Using GitHub Actions
-Create `.github/workflows/scheduler.yml`:
-```yaml
-name: Prayer Scheduler
-on:
-  schedule:
-    - cron: '*/5 * * * *'
-  workflow_dispatch:
-
-jobs:
-  scheduler:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Trigger Prayer Scheduler
-        run: |
-          curl -X POST https://your-app.com/api/cron/prayer-scheduler \
-            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
+### Local development
+Trigger a tick by hand (no daemon):
+```bash
+npm run tick-once                       # one live tick
+SCHEDULER_DRY_RUN=1 npm run tick-once   # dry run: logs subjects, sends nothing
 ```
+
+### Production — GitHub Action (primary, every plan)
+`.github/workflows/run-scheduler.yml` runs every 5 minutes, then curls
+`/api/health` and fails with `::error::` if `staleFor > 900`. Add two **Actions
+secrets** in the GitHub repo:
+- `CRON_URL` = `https://your-app.vercel.app/api/cron/prayer-scheduler`
+- `CRON_SECRET` = the same value as the Vercel `CRON_SECRET` env var.
+
+### Production — Vercel Cron (daily backstop)
+On the **Hobby** plan Vercel Cron is limited to once per day, so `vercel.json`
+ships `0 3 * * *` as a refresh backstop only. On **Pro**, change it to
+`*/5 * * * *` and the GitHub Action becomes optional redundancy.
+
+### Verifying it is alive
+Open `https://your-app.vercel.app/api/health` after the first Action tick and
+confirm `scheduler.lastFinishedOk = true` and `staleFor < 900`. For a one-off
+real message, `SMOKE_TEST_EMAIL=you@domain npm run smoke-reminder` sends a
+pre-reminder + follow-up through the live SMTP path.
 
 ## Database Schema Overview
 
@@ -171,8 +205,12 @@ The following tables are created in Supabase:
 - `user_profiles`: Additional user data (linked to Supabase Auth)
 - `prayer_times`: Cached prayer times per user per date
 - `responses`: User prayer completion status
-- `notifications_log`: Email notification tracking
+- `notifications_log`: Email notification tracking — unique on
+  `(user_id, prayer_name, date, type)`; doubles as the idempotent
+  "already-sent" record via its atomic `ON CONFLICT DO NOTHING` claim
 - `group_invitations`: Email-based group invitations
+- `sessions`: Serverless express-session store
+- `cron_heartbeat`: single-row (`id = 1`) liveness record for the scheduler
 
 ## Security Considerations
 

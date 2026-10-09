@@ -1,4 +1,3 @@
-const cron = require("node-cron");
 const moment = require("moment-timezone");
 const db = require("../db");
 // Service-role client: the scheduler runs outside any user session, so it must
@@ -28,7 +27,17 @@ const MISSED_AFTER_MIN = Number(process.env.MISSED_AFTER_MINUTES || 120);
 // A email whose window has closed is logged 'skipped_stale' and NEVER sent —
 // a late tick (restart, downtime, SMTP failure) must not cause catch-up or
 // duplicate emails stacking on top of the next prayer's reminders.
-const SEND_GRACE_MIN = Number(process.env.SEND_GRACE_MINUTES || 10);
+//
+// Default widened from 10 to 15 to cover one missed 5-minute trigger without
+// letting a stale reminder stack into the next prayer's window — the
+// NEXT_PRAYER_BUFFER_MIN clamp in buildDayPlan is the actual anti-stacking
+// safeguard, and it caps every reminder/followup at (next prayer − 5 min).
+const SEND_GRACE_MIN = Number(process.env.SEND_GRACE_MINUTES || 15);
+// Hard per-tick cap on real emails. Protects SMTP rate limits on shared relays
+// and lets a large user-base catch up across multiple ticks instead of one.
+// Anything past the cap has its claim released so the next tick picks it up
+// inside the widened grace window. 0 disables the cap.
+const MAX_EMAILS_PER_TICK = Number(process.env.MAX_EMAILS_PER_TICK || 50);
 // Keep clear of the next prayer: a follow-up / auto-mark is nudged to finish at
 // least this many minutes before the next prayer begins, so two prayers' events
 // never stack on top of each other.
@@ -59,7 +68,19 @@ const AYYAM_HOUR = Number(process.env.AYYAM_REMINDER_HOUR || 9);
  * "everything enabled" so existing users keep receiving all emails until they
  * actively opt out. Each prayer toggle gates BOTH its pre-reminder and its
  * follow-up; `pre`/`post` are global switches for the two email types.
+ *
+ * Per-user offsets (preMinutes / postMinutes) let someone pick 15 or 45 while
+ * the global default stays 30. Invalid values (non-numeric, out of 5–120)
+ * silently fall back to the global default so a corrupt blob never produces a
+ * reminder in the wrong slot.
  */
+function clampOffset(v, dflt) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return dflt;
+  if (n < 5 || n > 120) return dflt;
+  return Math.round(n);
+}
+
 function notifPrefsOf(user) {
   const p = user.notification_prefs || {};
   const prayers = p.prayers || {};
@@ -71,6 +92,8 @@ function notifPrefsOf(user) {
   return {
     pre: p.pre !== false,
     post: p.post !== false,
+    preMinutes: clampOffset(p.preMinutes, PRE_REMINDER_MIN),
+    postMinutes: clampOffset(p.postMinutes, FOLLOWUP_DELAY_MIN),
     enabled: (name) => prayers[name] !== false,
     // Ayyam al-Biḍʿ monthly sunnah-fast nudge.
     sunnahFast: p.sunnahFast === true,
@@ -111,9 +134,16 @@ async function upsertPendingResponse(userId, groupId, prayerName, date, extra) {
  * Returns an array (chronological) of:
  *   { name, timeStr, at, preAt, postAt, cutoff }  (all moment objects in the
  *   user's own timezone; compare instants directly).
+ *
+ * `prefs` is optional and only used to read preMinutes/postMinutes. When absent
+ * (or when it comes from a user whose blob predates the per-user offsets) the
+ * global defaults PRE_REMINDER_MIN / FOLLOWUP_DELAY_MIN apply, so a caller
+ * passing only a row keeps working unchanged.
  */
-function buildDayPlan(row) {
+function buildDayPlan(row, prefs) {
   const tz = row.timezone;
+  const preMin = (prefs && Number.isFinite(prefs.preMinutes)) ? prefs.preMinutes : PRE_REMINDER_MIN;
+  const postMin = (prefs && Number.isFinite(prefs.postMinutes)) ? prefs.postMinutes : FOLLOWUP_DELAY_MIN;
   const points = PRAYERS.map((name) => {
     const t = row[name.toLowerCase()];
     if (!t) return null;
@@ -125,16 +155,17 @@ function buildDayPlan(row) {
     const prev = points[i - 1];
     const next = points[i + 1];
 
-    // Pre-reminder: PRE minutes before the prayer, but never before the previous
-    // prayer's own time (+1 min) so consecutive reminders can't pile up.
-    let preAt = p.at.clone().subtract(PRE_REMINDER_MIN, "minutes");
+    // Pre-reminder: preMin minutes before the prayer, but never before the
+    // previous prayer's own time (+1 min) so consecutive reminders can't pile
+    // up. Users who pick a big lead (60+) get clamped to the previous prayer.
+    let preAt = p.at.clone().subtract(preMin, "minutes");
     if (prev) {
       const floor = prev.at.clone().add(1, "minutes");
       if (preAt.isBefore(floor)) preAt = floor;
     }
 
-    // Follow-up: POST minutes after the prayer.
-    const postAt = p.at.clone().add(FOLLOWUP_DELAY_MIN, "minutes");
+    // Follow-up: postMin minutes after the prayer.
+    const postAt = p.at.clone().add(postMin, "minutes");
 
     // Auto-mark cutoff: the earlier of the fixed cap and (next prayer - buffer),
     // but never sooner than the follow-up + a minimum response window.
@@ -306,189 +337,285 @@ function logSkip(user, a) {
 }
 
 /**
- * Core tick: runs every few minutes. For every user with a city set, it rebuilds
- * the day's plan from THEIR actual, freshly-fetched prayer times (in their own
- * timezone) and asks planTickActions() which emails are due THIS tick. Each due
- * email is claimed atomically in notifications_log (insert-first, on-conflict do
- * nothing) before sending, so overlapping ticks can never double-send; every
- * expired email is permanently marked 'skipped_stale' and never caught up.
+ * Core tick: called externally every 5 minutes (GitHub Actions workflow or
+ * Vercel Cron hitting POST /api/cron/prayer-scheduler). For every user with a
+ * city set, it rebuilds the day's plan from THEIR actual, freshly-fetched
+ * prayer times (in their own timezone) and asks planTickActions() which emails
+ * are due THIS tick. Each due email is claimed atomically in notifications_log
+ * (insert-first, on-conflict do nothing) before sending, so overlapping ticks
+ * can never double-send; every expired email is permanently marked
+ * 'skipped_stale' and never caught up.
+ *
+ * This function no longer self-schedules. Serverless invocations return before
+ * any in-process timer would fire, so the ONLY correct trigger path is an
+ * external HTTP request. For local development, run `npm run tick-once`.
+ *
+ * Options on `process.env`:
+ *   SCHEDULER_DRY_RUN=1       Skip SMTP; log every email that WOULD have been
+ *                             sent and still mark the notification_log row as
+ *                             'sent' so the pipeline is exercised end-to-end.
+ *   MAX_EMAILS_PER_TICK=<n>   Hard cap on real emails per invocation. Any
+ *                             claim beyond the cap is released so the next
+ *                             tick picks it up inside the widened grace window.
  */
 async function tick(nowOverride) {
   const now = nowOverride ? moment(nowOverride) : moment();
+  const startTs = new Date().toISOString();
+  const DRY_RUN = process.env.SCHEDULER_DRY_RUN === 'true' || process.env.SCHEDULER_DRY_RUN === '1';
+  const capEnv = Number(process.env.MAX_EMAILS_PER_TICK || MAX_EMAILS_PER_TICK);
+  const cap = Number.isFinite(capEnv) && capEnv > 0 ? capEnv : Infinity;
 
-  // Get all users with city and country set from Supabase
-  const { data: profiles, error: userError } = await supabase
-    .from('user_profiles')
-    .select('*')
-    .not('city', 'is', null)
-    .not('country', 'is', null);
+  // Heartbeat counters persisted to cron_heartbeat in the finally block, no
+  // matter how the tick exits (throw, rate-cap release, per-user error).
+  let usersSeen = 0, emailsSent = 0, emailsSkippedStale = 0, tickError = null;
 
-  if (userError) {
-    console.error('[scheduler] Error fetching users:', userError);
-    return;
-  }
+  try {
+    // Get all users with city and country set from Supabase
+    const { data: profiles, error: userError } = await supabase
+      .from('user_profiles')
+      .select('*')
+      .not('city', 'is', null)
+      .not('country', 'is', null);
 
-  for (const user of profiles) {
-    try {
-      const row = await getOrFetchTodayTimes(user);
-      if (!row || !row.timezone) continue;
+    if (userError) {
+      console.error('[scheduler] Error fetching users:', userError);
+      tickError = `fetch-users: ${userError.message}`;
+      return;
+    }
+    usersSeen = (profiles || []).length;
 
-      const date = row.date;
-      const prefs = notifPrefsOf(user);
-      const plan = buildDayPlan(row);
-      const specials = buildSpecialEvents(row, prefs);
+    for (const user of profiles) {
+      try {
+        const row = await getOrFetchTodayTimes(user);
+        if (!row || !row.timezone) continue;
 
-      // Validation logging: dump the plan once, right after the day's times are
-      // fetched/updated, so we can confirm each reminder's scheduled timestamp.
-      if (row.fetched_at && now.diff(moment(row.fetched_at), "minutes") <= PLAN_LOG_FRESH_MIN) {
-        logDayPlan(user, row, plan);
-      }
-
-      // One query builds the handled-set: every (prayer, type) that already has
-      // a log row — sent or skipped_stale — is never touched again.
-      const loggedSet = await db.getNotificationLogKeys(user.id, date);
-      const actions = planTickActions(plan, now, prefs, loggedSet, SEND_GRACE_MIN, specials);
-
-      for (const a of actions) {
-        const base = {
-          user_id: user.id, prayer_name: a.prayer, date,
-          type: a.type, scheduled_at: a.scheduledAt.toISOString(),
-        };
-
-        // Expired or capped-out email: write a permanent 'skipped_stale' row so
-        // no later tick can reconsider it, then warn. NEVER send.
-        if (a.action === "skipped_stale") {
-          const claimed = await db.claimNotificationLog({ ...base, status: "skipped_stale" });
-          if (claimed) logSkip(user, a);
-          continue;
-        }
-
-        // Due email: claim FIRST (ON CONFLICT DO NOTHING on the unique key).
-        // A conflicting insert means another tick already handled this email.
-        const claimed = await db.claimNotificationLog({ ...base, status: "sending" });
-        if (!claimed) continue;
-
-        const ev = plan.find((p) => p.name === a.prayer);
-        let result = { success: false, error: "auth user lookup failed" };
-        const { data: authUser } = await supabase.auth.admin.getUserById(user.id);
-        if (authUser && authUser.user) {
-          const to = authUser.user.email;
-          if (a.type === "reminder") {
-            result = await sendMail({
-              to,
-              subject: t(resolveLocale(user, resolveLocaleFromCountry), "email.subject.prayer_soon", { prayer: a.prayer, mins: PRE_REMINDER_MIN }),
-              html: reminderEmailHtml(user, a.prayer, ev.timeStr, PRE_REMINDER_MIN),
-            });
-          } else if (a.type === "followup") {
-            // Follow-up inputs are ONLY: prayer time + FOLLOWUP_DELAY, prefs,
-            // dedup. It never depends on the pre-reminder or the next prayer.
-            const token = createResponseToken(user.id, a.prayer, date);
-            const yesUrl = `${siteOrigin()}/respond?token=${token}&action=yes`;
-            const noUrl = `${siteOrigin()}/respond?token=${token}&action=no`;
-            result = await sendMail({
-              to,
-              subject: t(resolveLocale(user, resolveLocaleFromCountry), "email.subject.followup", { prayer: a.prayer }),
-              html: followupEmailHtml(user, a.prayer, date, yesUrl, noUrl),
-            });
-          } else if (a.type === "sunnah_fast") {
-            result = await sendMail({
-              to,
-              subject: t(resolveLocale(user, resolveLocaleFromCountry), "email.subject.ayyam"),
-              html: sunnahFastEmailHtml(user, row),
-            });
-          } else if (a.type === "suhoor") {
-            result = await sendMail({
-              to,
-              subject: t(resolveLocale(user, resolveLocaleFromCountry), "email.subject.suhoor"),
-              html: suhoorEmailHtml(user, row),
-            });
-          } else if (a.type === "iftar") {
-            result = await sendMail({
-              to,
-              subject: t(resolveLocale(user, resolveLocaleFromCountry), "email.subject.iftar"),
-              html: iftarEmailHtml(user, row),
-            });
-          } else if (a.type === "taraweeh") {
-            result = await sendMail({
-              to,
-              subject: t(resolveLocale(user, resolveLocaleFromCountry), "email.subject.taraweeh"),
-              html: taraweehEmailHtml(user, row),
-            });
+        // Aladhan-down detection: a fresh fetch stamps fetched_at within the
+        // last few minutes. Anything older than 26 hours means today's fetch
+        // failed and we are working from a stale cache. Surface it as a
+        // single structured line so ops can grep without reading HTTP logs.
+        if (row.fetched_at) {
+          const ageHours = now.diff(moment(row.fetched_at), 'hours', true);
+          if (ageHours > 26) {
+            console.warn(`[scheduler] aladhan-unavailable user=${user.id} using-cache date=${row.date} ageHours=${Math.round(ageHours)}`);
           }
         }
 
-        if (result.success) {
-          await db.markNotificationLogSent(claimed.id);
-          if (a.type === "reminder") {
-            await upsertPendingResponse(user.id, user.group_id, a.prayer, date);
-            console.log(`[scheduler] sent reminder user=${user.id} ${a.prayer} at=${ev.at.toISOString()} target=${a.scheduledAt.toISOString()}`);
-          } else if (a.type === "followup") {
+        const date = row.date;
+        const prefs = notifPrefsOf(user);
+        const plan = buildDayPlan(row, prefs);
+        const specials = buildSpecialEvents(row, prefs);
+
+        // Validation logging: dump the plan once, right after the day's times are
+        // fetched/updated, so we can confirm each reminder's scheduled timestamp.
+        if (row.fetched_at && now.diff(moment(row.fetched_at), "minutes") <= PLAN_LOG_FRESH_MIN) {
+          logDayPlan(user, row, plan);
+        }
+
+        // One query builds the handled-set: every (prayer, type) that already has
+        // a log row — sent or skipped_stale — is never touched again.
+        const loggedSet = await db.getNotificationLogKeys(user.id, date);
+        const actions = planTickActions(plan, now, prefs, loggedSet, SEND_GRACE_MIN, specials);
+
+        for (const a of actions) {
+          const base = {
+            user_id: user.id, prayer_name: a.prayer, date,
+            type: a.type, scheduled_at: a.scheduledAt.toISOString(),
+          };
+
+          // Expired or capped-out email: write a permanent 'skipped_stale' row so
+          // no later tick can reconsider it, then warn. NEVER send.
+          if (a.action === "skipped_stale") {
+            const claimed = await db.claimNotificationLog({ ...base, status: "skipped_stale" });
+            if (claimed) { emailsSkippedStale++; logSkip(user, a); }
+            continue;
+          }
+
+          // Gentle-tone skip: the follow-up is only for someone who has NOT
+          // already logged the prayer. If a 'done' row exists (user tapped
+          // Prayed on the dashboard, clicked the email's Yes link, or a
+          // qaḍā-marked one — none matter, they replied already), write a
+          // permanent skipped_stale so we never nudge them again for it.
+          if (a.type === "followup") {
             const existing = await db.getResponse(user.id, a.prayer, date);
-            if (existing) {
-              await db.updateResponse(existing.id, { followup_sent_at: new Date().toISOString() });
+            if (existing && existing.status === "done") {
+              const claimed = await db.claimNotificationLog({ ...base, status: "skipped_stale" });
+              if (claimed) {
+                emailsSkippedStale++;
+                logSkip(user, { ...a, reason: "already-logged" });
+              }
+              continue;
             }
-            console.log(`[scheduler] sent followup user=${user.id} ${a.prayer} at=${ev.at.toISOString()} target=${a.scheduledAt.toISOString()}`);
+          }
+
+          // Per-tick rate cap: refuse to claim once the ceiling is reached so a
+          // large user-base catches up across multiple ticks rather than one
+          // SMTP flood. The email stays unlogged, and the next tick sees it
+          // still due inside the widened SEND_GRACE window.
+          if (emailsSent >= cap) {
+            console.warn(`[scheduler] rate-cap user=${user.id} prayer=${a.prayer} type=${a.type} cap=${cap} reason=per-tick-limit`);
+            continue;
+          }
+
+          // Due email: claim FIRST (ON CONFLICT DO NOTHING on the unique key).
+          // A conflicting insert means another tick already handled this email.
+          const claimed = await db.claimNotificationLog({ ...base, status: "sending" });
+          if (!claimed) continue;
+
+          const ev = plan.find((p) => p.name === a.prayer);
+          let result = { success: false, error: "auth user lookup failed" };
+          const { data: authUser } = await supabase.auth.admin.getUserById(user.id);
+          if (authUser && authUser.user) {
+            const to = authUser.user.email;
+            if (DRY_RUN) {
+              // Emit the exact subject the real pipeline would send, but do
+              // nothing on the wire. Same shape as sendMail's success object.
+              const subj = a.type === "reminder"
+                ? t(resolveLocale(user, resolveLocaleFromCountry), "email.subject.prayer_soon", { prayer: a.prayer, mins: prefs.preMinutes })
+                : a.type === "followup"
+                  ? t(resolveLocale(user, resolveLocaleFromCountry), "email.subject.followup", { prayer: a.prayer })
+                  : `[dry-run ${a.type}]`;
+              result = { success: true, dryRun: true, subject: subj, to };
+            } else if (a.type === "reminder") {
+              result = await sendMail({
+                to,
+                subject: t(resolveLocale(user, resolveLocaleFromCountry), "email.subject.prayer_soon", { prayer: a.prayer, mins: prefs.preMinutes }),
+                html: reminderEmailHtml(user, a.prayer, ev.timeStr, prefs.preMinutes),
+              });
+            } else if (a.type === "followup") {
+              // Follow-up inputs are ONLY: prayer time + user's postMinutes,
+              // prefs, dedup. It never depends on the pre-reminder or the next
+              // prayer.
+              const token = createResponseToken(user.id, a.prayer, date);
+              const yesUrl = `${siteOrigin()}/respond?token=${token}&action=yes`;
+              const noUrl = `${siteOrigin()}/respond?token=${token}&action=no`;
+              result = await sendMail({
+                to,
+                subject: t(resolveLocale(user, resolveLocaleFromCountry), "email.subject.followup", { prayer: a.prayer }),
+                html: followupEmailHtml(user, a.prayer, date, yesUrl, noUrl, prefs.postMinutes),
+              });
+            } else if (a.type === "sunnah_fast") {
+              result = await sendMail({
+                to,
+                subject: t(resolveLocale(user, resolveLocaleFromCountry), "email.subject.ayyam"),
+                html: sunnahFastEmailHtml(user, row),
+              });
+            } else if (a.type === "suhoor") {
+              result = await sendMail({
+                to,
+                subject: t(resolveLocale(user, resolveLocaleFromCountry), "email.subject.suhoor"),
+                html: suhoorEmailHtml(user, row),
+              });
+            } else if (a.type === "iftar") {
+              result = await sendMail({
+                to,
+                subject: t(resolveLocale(user, resolveLocaleFromCountry), "email.subject.iftar"),
+                html: iftarEmailHtml(user, row),
+              });
+            } else if (a.type === "taraweeh") {
+              result = await sendMail({
+                to,
+                subject: t(resolveLocale(user, resolveLocaleFromCountry), "email.subject.taraweeh"),
+                html: taraweehEmailHtml(user, row),
+              });
+            }
+          }
+
+          if (result.success) {
+            await db.markNotificationLogSent(claimed.id);
+            emailsSent++;
+            const mode = DRY_RUN ? "dry-run-sent" : "sent";
+            if (a.type === "reminder") {
+              await upsertPendingResponse(user.id, user.group_id, a.prayer, date);
+              console.log(`[scheduler] ${mode} user=${user.id} prayer=${a.prayer} type=reminder at=${ev.at.toISOString()} scheduled_at=${a.scheduledAt.toISOString()} now=${now.toISOString()}`);
+            } else if (a.type === "followup") {
+              const existing = await db.getResponse(user.id, a.prayer, date);
+              if (existing) {
+                await db.updateResponse(existing.id, { followup_sent_at: new Date().toISOString() });
+              }
+              console.log(`[scheduler] ${mode} user=${user.id} prayer=${a.prayer} type=followup at=${ev.at.toISOString()} scheduled_at=${a.scheduledAt.toISOString()} now=${now.toISOString()}`);
+            } else {
+              console.log(`[scheduler] ${mode} user=${user.id} prayer=${a.prayer} type=${a.type} scheduled_at=${a.scheduledAt.toISOString()} now=${now.toISOString()}`);
+            }
           } else {
-            console.log(`[scheduler] sent ${a.type} user=${user.id} target=${a.scheduledAt.toISOString()}`);
-          }
-        } else {
-          // Send failed: release the claim so the next tick can retry inside the
-          // remaining window. Once the window closes it becomes skipped_stale.
-          await db.deleteNotificationLog(claimed.id);
-          console.error(`[scheduler] send failed, claim released user=${user.id} ${a.prayer} type=${a.type}: ${result.error}`);
-        }
-      }
-
-      for (const ev of plan) {
-        const { name, at, cutoff } = ev;
-
-        // Tracking (not email): once the prayer time has passed, make sure a
-        // response row exists so the user's taps and the auto-mark below have
-        // something to update — regardless of the user's email preferences.
-        if (now.isSameOrAfter(at)) {
-          await upsertPendingResponse(user.id, user.group_id, name, date);
-        }
-
-        // Auto-mark "Not Prayed" once the cutoff passes with no response.
-        // Logged separately (mark_source='auto') from a user's own tap.
-        // This step NEVER sends an email.
-        if (now.isSameOrAfter(cutoff)) {
-          const existing = await db.getResponse(user.id, name, date);
-          if (existing && existing.status === 'pending') {
-            await db.updateResponse(existing.id, { status: 'missed', mark_source: 'auto' });
-            console.log(`[scheduler] auto-marked missed user=${user.id} ${name} date=${date} cutoff=${cutoff.toISOString()}`);
+            // Send failed: release the claim so the next tick can retry inside the
+            // remaining window. Once the window closes it becomes skipped_stale.
+            await db.deleteNotificationLog(claimed.id);
+            console.error(`[scheduler] send-failed user=${user.id} prayer=${a.prayer} type=${a.type} scheduled_at=${a.scheduledAt.toISOString()} now=${now.toISOString()} reason=smtp-error error=${result.error}`);
           }
         }
-      }
 
-      // Ramadan fast tracking — independent of the Ramadan EMAILS: if the
-      // user's day is in Ramadan (per their own city's Hijri calendar) we open
-      // a 'Fast' pending row at Imsak/Fajr so the dashboard chip can mark it.
-      // Fast rows are kind='fast' and are NEVER auto-marked missed: no one
-      // gets a red "missed fast". The tracking email prefs do not gate this.
-      if (Number(row.hijri_month_num) === 9) {
-        const fastAnchor = moment.tz(`${row.date} ${row.imsak && row.imsak !== "00:00" ? row.imsak : row.fajr}`, "YYYY-MM-DD HH:mm", row.timezone);
-        if (fastAnchor.isValid() && now.isSameOrAfter(fastAnchor)) {
-          await upsertPendingResponse(user.id, user.group_id, "Fast", date, { kind: "fast" });
+        for (const ev of plan) {
+          const { name, at, cutoff } = ev;
+
+          // Tracking (not email): once the prayer time has passed, make sure a
+          // response row exists so the user's taps and the auto-mark below have
+          // something to update — regardless of the user's email preferences.
+          if (now.isSameOrAfter(at)) {
+            await upsertPendingResponse(user.id, user.group_id, name, date);
+          }
+
+          // Auto-mark "Not Prayed" once the cutoff passes with no response.
+          // Logged separately (mark_source='auto') from a user's own tap.
+          // This step NEVER sends an email.
+          if (now.isSameOrAfter(cutoff)) {
+            const existing = await db.getResponse(user.id, name, date);
+            if (existing && existing.status === 'pending') {
+              await db.updateResponse(existing.id, { status: 'missed', mark_source: 'auto' });
+              console.log(`[scheduler] auto-marked missed user=${user.id} prayer=${name} date=${date} cutoff=${cutoff.toISOString()}`);
+            }
+          }
         }
+
+        // Ramadan fast tracking — independent of the Ramadan EMAILS: if the
+        // user's day is in Ramadan (per their own city's Hijri calendar) we open
+        // a 'Fast' pending row at Imsak/Fajr so the dashboard chip can mark it.
+        // Fast rows are kind='fast' and are NEVER auto-marked missed: no one
+        // gets a red "missed fast". The tracking email prefs do not gate this.
+        if (Number(row.hijri_month_num) === 9) {
+          const fastAnchor = moment.tz(`${row.date} ${row.imsak && row.imsak !== "00:00" ? row.imsak : row.fajr}`, "YYYY-MM-DD HH:mm", row.timezone);
+          if (fastAnchor.isValid() && now.isSameOrAfter(fastAnchor)) {
+            await upsertPendingResponse(user.id, user.group_id, "Fast", date, { kind: "fast" });
+          }
+        }
+      } catch (err) {
+        console.error(`[scheduler] error for user ${user.id}:`, err.message);
       }
-    } catch (err) {
-      console.error(`[scheduler] error for user ${user.id}:`, err.message);
+    }
+
+    // One compact summary line so ops can grep the tick's total effect without
+    // parsing every per-email log.
+    console.log(`[scheduler] tick-complete now=${now.toISOString()} users=${usersSeen} sent=${emailsSent} skipped=${emailsSkippedStale} dry_run=${DRY_RUN}`);
+  } catch (err) {
+    tickError = err && err.message ? err.message : String(err);
+    throw err;
+  } finally {
+    // Persist the heartbeat AFTER the tick, in its own try so a heartbeat-write
+    // failure never masks or turns a successful tick into a failure.
+    try {
+      await db.upsertCronHeartbeat({
+        last_started_at: startTs,
+        last_finished_at: new Date().toISOString(),
+        last_error: tickError,
+        users_seen: usersSeen,
+        emails_sent: emailsSent,
+        emails_skipped_stale: emailsSkippedStale,
+        dry_run: DRY_RUN,
+      });
+    } catch (hbErr) {
+      console.error('[scheduler] heartbeat write failed:', hbErr.message);
     }
   }
 }
 
-function start() {
-  // Every 5 minutes. Adjust the cron expression if you want it more/less frequent.
-  cron.schedule("*/5 * * * *", () => {
-    tick().catch((e) => console.error("[scheduler] tick failed:", e));
-  });
-
-  // Also run once shortly after startup so today's data populates immediately.
-  setTimeout(() => tick().catch((e) => console.error("[scheduler] initial tick failed:", e)), 5000);
-
-  console.log("[scheduler] started — checking every 5 minutes");
-}
-
-// Export both start and tick for flexibility, plus internals for testing.
-module.exports = { start, tick, buildDayPlan, buildSpecialEvents, planTickActions, notifPrefsOf, SEND_GRACE_MIN, SPECIAL_KEYS };
+// Expose tick() and the pure internals for testing. `start()` used to run an
+// in-process node-cron here; that path was deleted because serverless hosts
+// exit before the first timer callback — see migration 0007 and README.
+module.exports = {
+  tick,
+  buildDayPlan,
+  buildSpecialEvents,
+  planTickActions,
+  notifPrefsOf,
+  SEND_GRACE_MIN,
+  SPECIAL_KEYS,
+};

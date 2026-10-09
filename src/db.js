@@ -320,7 +320,12 @@ const db = {
     return data && data.length ? data[0] : null;
   },
 
-  // Claimed row became a real send.
+  // Claimed row became a real send. In dry-run mode (SCHEDULER_DRY_RUN=1) the
+  // caller still ends up here: the row is stamped 'sent' with a real sent_at so
+  // the atomic-claim dedup keeps working and no email can double-send even
+  // after dry-run mode is switched off for the day. The tick itself records
+  // `dry_run: true` on the cron_heartbeat row, which is the single source of
+  // truth for "was this day's pipeline exercised without touching SMTP?".
   async markNotificationLogSent(id) {
     const { error } = await supabase
       .from('notifications_log')
@@ -421,6 +426,38 @@ const db = {
       .eq('id', userId)
       .select()
       .single();
+    if (error) throw error;
+    return data;
+  },
+
+  // Cron heartbeat (migration 0007) — a single row proving scheduler.tick()
+  // actually ran in production. Written from tick's finally block, read by
+  // GET /api/health. If the table doesn't exist yet (fresh DB, migration not
+  // applied), log once and swallow so the tick never breaks ops tooling that
+  // relies on this pattern degrading gracefully.
+  async upsertCronHeartbeat(fields) {
+    const entry = { id: 1, updated_at: new Date().toISOString(), ...fields };
+    const { error } = await supabase
+      .from('cron_heartbeat')
+      .upsert(entry, { onConflict: 'id' });
+    if (error && /cron_heartbeat|does not exist|relation/i.test(`${error.code || ''} ${error.message || ''}`)) {
+      if (!db._hbWarned) {
+        db._hbWarned = true;
+        console.warn('[db] cron_heartbeat table missing — apply migration 0007. Heartbeat writes will be no-ops.');
+      }
+      return;
+    }
+    if (error) throw error;
+  },
+
+  async getCronHeartbeat() {
+    const { data, error } = await supabase
+      .from('cron_heartbeat')
+      .select('*')
+      .eq('id', 1)
+      .single();
+    if (error && error.code === 'PGRST116') return null; // no row yet
+    if (error && /cron_heartbeat|does not exist|relation/i.test(`${error.code || ''} ${error.message || ''}`)) return null;
     if (error) throw error;
     return data;
   }

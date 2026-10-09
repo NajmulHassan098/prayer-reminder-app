@@ -59,51 +59,98 @@ app.use((req, res, next) => {
 });
 
 // Secured cron job endpoint for production deployment
-// This allows external cron services (Vercel Cron, GitHub Actions, etc.) to trigger prayer scheduling
+// This allows external cron services (Vercel Cron, GitHub Actions, etc.) to trigger prayer scheduling.
+//
+// The in-process node-cron path used to exist in scheduler.start() and was
+// called from server startup below. It has been removed because on Vercel each
+// HTTP invocation is a short-lived function; the 5-minute timer never got a
+// chance to fire before the invocation returned, so reminders appeared to work
+// locally and silently did nothing in production. Ops should now use the
+// GET /api/health endpoint (see below) to prove the external trigger actually
+// reaches the scheduler.
 app.post("/api/cron/prayer-scheduler", async (req, res) => {
   const CRON_SECRET = process.env.CRON_SECRET;
-  
+
   // Verify the request is authorized
   const authHeader = req.headers.authorization;
   const providedSecret = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
-  
+
+  // Log the raw hit before the auth decision so ops can see whether the
+  // endpoint is being reached at all (GitHub Action failing to fire vs. firing
+  // with the wrong secret look identical from a 401 alone).
+  const ua = (req.headers['user-agent'] || '').slice(0, 60);
+  console.log(`[cron] hit ua="${ua}" hasAuthHeader=${!!authHeader} hasSecretConfigured=${!!CRON_SECRET}`);
+
   if (!CRON_SECRET || providedSecret !== CRON_SECRET) {
     console.error('[cron] Unauthorized access attempt to prayer scheduler endpoint');
-    return res.status(401).json({ 
-      success: false, 
-      error: 'Unauthorized' 
+    return res.status(401).json({
+      success: false,
+      error: 'Unauthorized'
     });
   }
-  
+
   try {
     console.log('[cron] Authorized prayer scheduler tick triggered');
     await scheduler.tick();
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       message: 'Prayer scheduler executed successfully',
       timestamp: new Date().toISOString()
     });
   } catch (error) {
     console.error('[cron] Prayer scheduler execution failed:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
+    res.status(500).json({
+      success: false,
+      error: error.message
     });
   }
 });
 
-// Standalone scheduler entry point for Render cron jobs
-if (process.env.CRON_MODE === 'true') {
-  console.log('[scheduler] Running in standalone cron mode');
-  // Run once immediately then exit (Render will schedule this)
-  scheduler.tick().then(() => {
-    console.log('[scheduler] Cron job completed');
-    process.exit(0);
-  }).catch((error) => {
-    console.error('[scheduler] Cron job failed:', error);
-    process.exit(1);
+// Health endpoint. Unauthenticated on purpose: it is the ONLY way to prove to
+// ops (and to the GitHub Action itself, right after it posts the tick) that
+// the scheduler is actually firing in production. Response shape is small and
+// does not leak anything sensitive — just booleans and a heartbeat age.
+app.get("/api/health", async (req, res) => {
+  let scheduler = { present: false };
+  try {
+    const hb = await require("./db").getCronHeartbeat();
+    if (hb) {
+      const now = Date.now();
+      const lastStartMs = hb.last_started_at ? new Date(hb.last_started_at).getTime() : null;
+      scheduler = {
+        present: true,
+        lastTickAt: hb.last_started_at,
+        lastFinishedAt: hb.last_finished_at,
+        lastError: hb.last_error || null,
+        usersSeen: hb.users_seen,
+        emailsSent: hb.emails_sent,
+        emailsSkippedStale: hb.emails_skipped_stale,
+        dryRun: !!hb.dry_run,
+        staleFor: lastStartMs ? Math.round((now - lastStartMs) / 1000) : null,
+      };
+    }
+  } catch (err) {
+    scheduler = { present: false, error: err.message };
+  }
+  const envFlags = {
+    hasSmtp: !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS),
+    hasEmailFrom: !!process.env.EMAIL_FROM,
+    hasCronSecret: !!process.env.CRON_SECRET,
+    hasSupabaseUrl: !!process.env.SUPABASE_URL,
+    hasSupabaseServiceKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+    hasSessionSecret: !!process.env.SESSION_SECRET,
+    vercel: !!process.env.VERCEL,
+  };
+  // `ok` is intentionally only about the *endpoint* being up. Ops decides
+  // freshness from `scheduler.staleFor`. Anything that could crash health
+  // itself already lives inside the try, so we always return 200.
+  res.json({
+    ok: true,
+    scheduler,
+    env: envFlags,
+    emailMode: (process.env.SCHEDULER_DRY_RUN === 'true' || process.env.SCHEDULER_DRY_RUN === '1') ? 'dryrun' : 'live',
   });
-}
+});
 
 app.use(dashboardRoutes);
 app.use(authRoutes);
@@ -126,15 +173,12 @@ if (!process.env.VERCEL) {
   const startServer = (port) => {
     const server = app.listen(port, () => {
       console.log(`Prayer Reminder App running at http://localhost:${port}`);
-      
-      // Only start the internal scheduler if CRON_SECRET and CRON_MODE are not set
-      // This allows using external cron services in production
-      if (!process.env.CRON_SECRET && !process.env.CRON_MODE) {
-        console.log('[scheduler] Starting internal node-cron scheduler (development mode)');
-        scheduler.start();
-      } else {
-        console.log('[scheduler] Internal scheduler disabled (production mode - using external cron or Render cron job)');
-      }
+      // The scheduler NEVER self-runs in-process. Serverless hosts (Vercel)
+      // short-circuit the process before the timer can fire, and long-running
+      // hosts (local dev) should not compete with the external HTTP trigger.
+      // Manual tick: `npm run tick-once`. Production cadence: GitHub Action or
+      // Vercel Cron hitting POST /api/cron/prayer-scheduler every 5 minutes.
+      console.log('[scheduler] external trigger required (POST /api/cron/prayer-scheduler) — run `npm run tick-once` for a manual tick');
     });
 
     server.on('error', (e) => {

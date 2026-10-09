@@ -1,14 +1,16 @@
 name: Run prayer scheduler
 
-# Backup / plan-independent trigger for the prayer reminder scheduler.
+# Primary 5-minute trigger for the prayer reminder scheduler.
 #
-# Vercel's built-in cron (see vercel.json) only allows a once-per-day schedule on
-# the Hobby plan. This GitHub Action calls the same secured endpoint every 5
-# minutes on ANY plan, so reminders and follow-ups fire on time.
+# WHY: Vercel's built-in cron on the Hobby plan only allows one invocation per
+# day, which is far too slow for prayer-anchored reminders that need to fire
+# every few minutes. This GitHub Action calls the secured /api/cron endpoint
+# on a proper 5-minute cadence, and every successful run verifies the tick
+# actually landed by reading /api/health immediately after.
 #
 # To enable it, add these two Repository Secrets (GitHub -> Settings -> Secrets
 # and variables -> Actions):
-#   CRON_URL     e.g. https://your-app.vercel.app/api/cron/prayer-scheduler
+#   CRON_URL     e.g. https://prayer-app-sepia.vercel.app/api/cron/prayer-scheduler
 #   CRON_SECRET  the same value you set as the CRON_SECRET env var on Vercel
 #
 # Note: GitHub schedules Actions at a *minimum* interval of 5 minutes, which
@@ -32,3 +34,28 @@ jobs:
             -H "Authorization: Bearer $CRON_SECRET" \
             -H "Content-Type: application/json" \
             --fail-with-body
+
+      - name: Verify heartbeat (proof the scheduler actually ticked)
+        # Reads /api/health on the same host the cron URL points at. Prints
+        # staleFor (seconds since the last tick started) so a silent prod
+        # failure (missing CRON_SECRET, missing SMTP, etc.) is visible in the
+        # Action log without anyone having to open the site.
+        env:
+          CRON_URL: ${{ secrets.CRON_URL }}
+        run: |
+          HEALTH_URL=$(echo "$CRON_URL" | sed 's|/api/cron/prayer-scheduler$|/api/health|')
+          echo "GET $HEALTH_URL"
+          BODY=$(curl -sS "$HEALTH_URL")
+          echo "$BODY"
+          # Extract staleFor with pure shell (no jq dependency). If the field
+          # is missing or above 900s, fail the run loudly.
+          STALE=$(printf '%s' "$BODY" | tr ',' '\n' | grep '"staleFor"' | sed 's/.*: *\([0-9]*\).*/\1/')
+          if [ -z "$STALE" ] || [ "$STALE" = "null" ]; then
+            echo "::warning::cron_heartbeat row not found — apply migration 0007 and confirm tick() ran"
+            exit 0
+          fi
+          if [ "$STALE" -gt 900 ]; then
+            echo "::error::scheduler looks stale (last tick $STALEs ago — >15min). Check CRON_SECRET / SMTP env vars on Vercel"
+            exit 1
+          fi
+          echo "Heartbeat fresh (last tick $STALEs ago)."

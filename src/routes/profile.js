@@ -184,6 +184,16 @@ const PRAYERS = ["Fajr", "Dhuhr", "Asr", "Maghrib", "Isha"];
 // five-prayer switches default missing keys to ENABLED (historical behavior);
 // the newer seasonal features (Ayyam al-Biḍʿ, Ramadan) default OFF — a feature
 // that emails more than the established two-per-prayer must be asked for.
+// preMinutes/postMinutes default to the global 30-minute offset; any
+// out-of-range or non-numeric stored value is snapped back so a corrupt blob
+// never produces a reminder at the wrong instant.
+function clampOffset(v, dflt) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return dflt;
+  if (n < 5 || n > 120) return dflt;
+  return Math.round(n);
+}
+
 function parsePrefs(raw) {
   const p = raw || {};
   const prayers = p.prayers || {};
@@ -192,6 +202,8 @@ function parsePrefs(raw) {
     prayers: PRAYERS.reduce((acc, n) => { acc[n] = prayers[n] !== false; return acc; }, {}),
     pre: p.pre !== false,
     post: p.post !== false,
+    preMinutes: clampOffset(p.preMinutes, 30),
+    postMinutes: clampOffset(p.postMinutes, 30),
     sunnahFast: p.sunnahFast === true,
     ramadan: {
       enabled: ram.enabled === true,
@@ -218,10 +230,16 @@ router.post("/notifications", requireLogin, async (req, res) => {
   PRAYERS.forEach((n) => { prayers[n] = body[`prayer_${n}`] === "on"; });
   const pre = body.pre === "on";
   const post = body.post === "on";
+  // Snap the two offsets into [5, 120] minutes with a 30-minute default, so a
+  // user typing "500" or leaving the field blank still gets a valid value.
+  const preMinutes = clampOffset(body.pre_minutes, 30);
+  const postMinutes = clampOffset(body.post_minutes, 30);
   const notification_prefs = {
     prayers,
     pre,
     post,
+    preMinutes,
+    postMinutes,
     sunnahFast: body.sunnah_fast === "on",
     ramadan: {
       enabled: body.ramadan_enabled === "on",

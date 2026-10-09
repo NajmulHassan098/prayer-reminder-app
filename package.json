@@ -7,7 +7,9 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "test": "node --test \"tests/*.test.js\"",
-    "refresh-times": "node scripts/refresh-prayer-times.js"
+    "refresh-times": "node scripts/refresh-prayer-times.js",
+    "tick-once": "node scripts/tick-once.js",
+    "smoke-reminder": "node scripts/smoke-reminder.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",
@@ -19,7 +21,6 @@
     "jsonwebtoken": "^9.0.2",
     "memorystore": "^1.6.7",
     "moment-timezone": "^0.5.45",
-    "node-cron": "^3.0.3",
     "nodemailer": "^6.9.15"
   }
 }

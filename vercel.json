@@ -15,7 +15,7 @@
   "crons": [
     {
       "path": "/api/cron/prayer-scheduler",
-      "schedule": "0 0 * * *"
+      "schedule": "0 3 * * *"
     }
   ],
   "env": {
