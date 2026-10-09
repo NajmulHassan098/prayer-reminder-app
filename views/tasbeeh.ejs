@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="<%= typeof locale !== 'undefined' && locale ? locale : 'en' %>" dir="<%= typeof dir !== 'undefined' && dir ? dir : 'ltr' %>">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tasbeeh — Prayer Reminder</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/theme.js"></script>
+  <link rel="stylesheet" href="/style.css" />
+  <style>
+    /* One-handed counter: the tap zone must never zoom, select or ghost-click. */
+    #tap-zone { touch-action: manipulation; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
+    #tap-zone:active .ring-bg { stroke: #34d399; }
+    .ring-fg { transition: stroke-dashoffset 120ms linear; }
+    .count-pop { animation: pop 180ms ease-out; }
+    @keyframes pop { 0% { transform: scale(1); } 40% { transform: scale(1.06); } 100% { transform: scale(1); } }
+    .cue-flash .ring-fg { stroke: #fbbf24; }
+    @media (prefers-reduced-motion: reduce) {
+      .ring-fg { transition: none; }
+      .count-pop, .cue-flash .ring-fg { animation: none; }
+    }
+    dialog::backdrop { background: rgba(2, 6, 23, 0.7); }
+  </style>
+</head>
+<body class="bg-slate-950 min-h-screen text-slate-100 antialiased" style="background-image: radial-gradient(60rem 60rem at 110% -10%, rgba(16,185,129,0.10), transparent 60%), radial-gradient(50rem 50rem at -10% 10%, rgba(99,102,241,0.10), transparent 55%);">
+  <%- include('components/navigation', { user, isAdmin: false }) %>
+
+  <!-- Server copy of the last sync, used only when this browser's localStorage
+       is empty (fresh device / cleared cache). JSON, escaped by EJS. -->
+  <div id="app" class="container mx-auto px-4 pt-20 pb-6 max-w-md flex flex-col min-h-[calc(100vh-6rem)]"
+       data-server='<%= JSON.stringify(serverTasbeeh) %>'>
+
+    <!-- Dhikr selector -->
+    <div class="text-center mt-2">
+      <select id="dhikr" aria-label="Choose dhikr"
+              class="bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-emerald-300 font-semibold text-lg focus:outline-none focus:ring-2 focus:ring-emerald-500">
+        <% ["SubhanAllah","Alhamdulillah","Allahu Akbar","custom"].forEach(function(d){ %>
+        <option value="<%= d %>"><%= d === "custom" ? "Custom…" : d %></option>
+        <% }); %>
+      </select>
+      <input id="custom-dhikr" type="text" maxlength="80" placeholder="Your dhikr"
+             class="hidden mt-2 w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+    </div>
+
+    <!-- The ring IS the button -->
+    <div class="flex-1 flex items-center justify-center py-4">
+      <button id="tap-zone" type="button" aria-describedby="count-out"
+              class="relative w-[min(78vw,22rem)] aspect-square rounded-full focus:outline-none focus:ring-4 focus:ring-emerald-500/50">
+        <svg viewBox="0 0 200 200" class="w-full h-full -rotate-90" aria-hidden="true">
+          <circle class="ring-bg" cx="100" cy="100" r="92" fill="rgba(15,23,42,0.6)" stroke="#1e293b" stroke-width="10"/>
+          <circle id="ring-fg" class="ring-fg" cx="100" cy="100" r="92" fill="none" stroke="#10b981" stroke-width="10"
+                  stroke-linecap="round" stroke-dasharray="578.05" stroke-dashoffset="578.05"/>
+        </svg>
+        <span class="absolute inset-0 flex flex-col items-center justify-center gap-1">
+          <span id="count-out" aria-live="polite" class="text-7xl font-bold tabular-nums text-white leading-none">0</span>
+          <span id="round-out" class="text-slate-400 text-sm">of 33</span>
+          <span id="cue-out" class="text-amber-300 text-sm font-semibold h-5 opacity-0">Mā shāʾ Allāh — complete</span>
+          <span id="hint-out" class="text-slate-500 text-xs mt-1">tap the circle</span>
+        </span>
+      </button>
+    </div>
+
+    <!-- Controls -->
+    <div class="flex items-center justify-center gap-3 mb-4">
+      <button id="undo-btn" type="button" class="px-4 py-2.5 rounded-xl bg-slate-800/70 hover:bg-slate-700 border border-slate-700 text-slate-200 font-semibold transition-colors">↺ Undo</button>
+      <button id="reset-btn" type="button" class="px-4 py-2.5 rounded-xl bg-slate-800/70 hover:bg-slate-700 border border-slate-700 text-slate-200 font-semibold transition-colors">Reset</button>
+    </div>
+    <div class="flex items-center justify-center gap-2 mb-4" role="group" aria-label="Target presets">
+      <% [33, 99, 100].forEach(function(t){ %>
+      <button type="button" data-target="<%= t %>" class="target-btn px-3.5 py-2 rounded-lg bg-slate-800/70 hover:bg-slate-700 border border-slate-700 text-slate-200 text-sm font-semibold transition-colors"><%= t %></button>
+      <% }); %>
+      <label class="flex items-center gap-1 text-sm text-slate-400">
+        custom
+        <input id="custom-target" type="number" min="1" max="10000" class="w-20 px-2 py-2 rounded-lg bg-slate-900 border border-slate-700 text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+      </label>
+    </div>
+    <div class="flex items-center justify-center gap-5 text-sm text-slate-400 mb-2">
+      <label class="flex items-center gap-2"><input id="sound-toggle" type="checkbox" checked class="accent-emerald-500 w-4 h-4" /> 🔊 sound</label>
+      <label class="flex items-center gap-2"><input id="haptics-toggle" type="checkbox" checked class="accent-emerald-500 w-4 h-4" /> 📳 vibration</label>
+      <span id="sync-status" class="text-xs" aria-live="polite"></span>
+    </div>
+    <p id="restore-note" class="hidden text-center text-xs text-emerald-300/80 mb-2">Restored from your account.</p>
+    <p class="text-center text-slate-500 text-xs">Every tap counts — counting continues after each round. Your dhikr stays between you and Allah.</p>
+  </div>
+
+  <!-- Reset confirmation -->
+  <dialog id="reset-dialog" class="bg-slate-900 border border-slate-700 rounded-2xl p-6 text-slate-100 max-w-xs w-full mx-auto">
+    <h2 class="font-bold text-lg mb-2">Start over?</h2>
+    <p class="text-slate-400 text-sm mb-4">Your current count will be lost.</p>
+    <form method="dialog" class="flex gap-3 justify-end">
+      <button value="cancel" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 font-semibold">Keep counting</button>
+      <button id="reset-confirm" value="reset" class="px-4 py-2 rounded-xl bg-red-500/80 hover:bg-red-500 font-semibold">Reset</button>
+    </form>
+  </dialog>
+
+  <script src="/tasbeeh-core.js"></script>
+  <script>
+  (function () {
+    "use strict";
+    var C = window.TasbeehCore;
+    var STORE_KEY = "tasbeeh:v1";
+    var app = document.getElementById("app");
+
+    // --- hydrate: localStorage first (instant, offline), server copy as the
+    // clear-cache recovery path. ---
+    var state = null;
+    try { state = C.loadJSON(localStorage.getItem(STORE_KEY)); } catch (e) { state = null; }
+    var server = null;
+    try { server = JSON.parse(app.getAttribute("data-server")); } catch (e) {}
+    if (!state) {
+      if (server && (server.lastCount > 0 || server.target !== C.DEFAULTS.target)) {
+        state = C.initialState(Object.assign({}, server, { count: server.lastCount || 0 }));
+        document.getElementById("restore-note").classList.remove("hidden");
+      } else {
+        state = C.initialState();
+      }
+    }
+
+    // --- elements ---
+    var el = {
+      tap: document.getElementById("tap-zone"),
+      count: document.getElementById("count-out"),
+      round: document.getElementById("round-out"),
+      cue: document.getElementById("cue-out"),
+      hint: document.getElementById("hint-out"),
+      ring: document.getElementById("ring-fg"),
+      dhikr: document.getElementById("dhikr"),
+      custom: document.getElementById("custom-dhikr"),
+      undo: document.getElementById("undo-btn"),
+      reset: document.getElementById("reset-btn"),
+      dialog: document.getElementById("reset-dialog"),
+      sound: document.getElementById("sound-toggle"),
+      haptics: document.getElementById("haptics-toggle"),
+      sync: document.getElementById("sync-status"),
+      customTarget: document.getElementById("custom-target"),
+    };
+    var CIRC = 2 * Math.PI * 92;
+
+    // --- paint (rAF-coalesced so rapid taps never drop a count) ---
+    var paintQueued = false;
+    function paint() {
+      paintQueued = false;
+      el.count.textContent = state.count.toLocaleString();
+      var inRound = state.target > 0 ? state.count % state.target : 0;
+      if (state.count > 0 && inRound === 0) inRound = state.target;
+      el.round.textContent = "of " + state.target.toLocaleString() +
+        (state.count >= state.target ? " · round " + Math.ceil(state.count / state.target).toLocaleString() : "");
+      // A finished round shows a FULL ring (roundProgress would be 0 there).
+      var prog = inRound / state.target;
+      el.ring.setAttribute("stroke-dashoffset", String(CIRC * (1 - prog)));
+      el.tap.setAttribute("aria-label", "Tasbeeh counter for " + C.dhikrLabel(state) + ", currently " + state.count + ". Tap to count.");
+      el.hint.textContent = state.capped ? "counter limit reached — may Allah accept it" : (state.count === 0 ? "tap the circle" : "");
+      el.count.classList.remove("count-pop"); void el.count.offsetWidth; el.count.classList.add("count-pop");
+    }
+    function queuePaint() { if (!paintQueued) { paintQueued = true; requestAnimationFrame(paint); } }
+
+    var cueTimer = null;
+    function fireCue() {
+      el.cue.textContent = "Mā shāʾ Allāh — " + state.target + " complete";
+      el.tap.classList.add("cue-flash");
+      el.cue.style.opacity = "1";
+      if (state.haptics && navigator.vibrate) navigator.vibrate([15, 60, 15]);
+      if (state.sound) chime();
+      clearTimeout(cueTimer);
+      cueTimer = setTimeout(function () {
+        el.tap.classList.remove("cue-flash");
+        el.cue.style.opacity = "0";
+      }, 2200);
+    }
+
+    // Soft two-note chime via WebAudio — no audio assets needed.
+    var audioCtx = null;
+    function chime() {
+      try {
+        audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+        var t = audioCtx.currentTime;
+        [[659.25, 0], [880, 0.12]].forEach(function (note) {
+          var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+          o.type = "sine"; o.frequency.value = note[0];
+          g.gain.setValueAtTime(0.0001, t + note[1]);
+          g.gain.exponentialRampToValueAtTime(0.12, t + note[1] + 0.03);
+          g.gain.exponentialRampToValueAtTime(0.0001, t + note[1] + 0.28);
+          o.connect(g); g.connect(audioCtx.destination);
+          o.start(t + note[1]); o.stop(t + note[1] + 0.3);
+        });
+      } catch (e) { /* sound is a bonus, never a failure */ }
+    }
+
+    // --- screen wake lock while counting (feature-detected, silent no-op) ---
+    var wakeLock = null;
+    function keepAwake() {
+      if (!("wakeLock" in navigator)) return;
+      navigator.wakeLock.request("screen").then(function (lock) {
+        wakeLock = lock;
+        lock.addEventListener("release", function () { wakeLock = null; });
+      }).catch(function () {});
+    }
+    document.addEventListener("visibilitychange", function () {
+      if (document.visibilityState === "visible" && state.count > 0 && !wakeLock) keepAwake();
+      if (document.visibilityState === "hidden") scheduleSync(true);
+    });
+
+    // --- account sync: debounced POST, sendBeacon when the page hides ---
+    var syncTimer = null;
+    function syncPayload() {
+      return JSON.stringify({
+        lastCount: state.count, target: state.target, dhikr: state.dhikr,
+        customDhikr: state.customDhikr, sound: state.sound, haptics: state.haptics,
+      });
+    }
+    function scheduleSync(immediate) {
+      clearTimeout(syncTimer);
+      if (immediate) return doSync(true);
+      el.sync.textContent = "Saving…";
+      syncTimer = setTimeout(function () { doSync(false); }, 5000);
+    }
+    function doSync(beacon) {
+      var body = syncPayload();
+      if (beacon && navigator.sendBeacon) {
+        navigator.sendBeacon("/tasbeeh/sync", new Blob([body], { type: "application/json" }));
+        return;
+      }
+      fetch("/tasbeeh/sync", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        credentials: "same-origin", body: body,
+      }).then(function (r) {
+        el.sync.textContent = r.ok ? "Synced ✓" : "Not synced";
+      }).catch(function () { el.sync.textContent = "Not synced"; });
+    }
+
+    // --- dispatch: every state change saves locally + schedules sync ---
+    function dispatch(action) {
+      var prev = state;
+      state = C.next(state, action);
+      if (state === prev) return;
+      try { localStorage.setItem(STORE_KEY, C.saveJSON(state)); } catch (e) {}
+      queuePaint();
+      if (action.type === "increment") {
+        keepAwake();
+        if (state.completedAt !== prev.completedAt && state.completedAt !== null) fireCue();
+        scheduleSync(false);
+      } else if (action.type !== "toggle") {
+        scheduleSync(false);
+      }
+    }
+
+    // Tap: pointerdown counts; the click that follows is ignored via the
+    // detail>0 guard, while keyboard Enter/Space (detail 0) still counts once.
+    var lastPointer = 0;
+    el.tap.addEventListener("pointerdown", function (e) {
+      e.preventDefault();
+      lastPointer = Date.now();
+      dispatch({ type: "increment" });
+    });
+    el.tap.addEventListener("click", function (e) {
+      if (e.detail === 0) dispatch({ type: "increment" });        // keyboard
+      else if (Date.now() - lastPointer > 400) dispatch({ type: "increment" }); // non-synthetic fallback
+    });
+    el.tap.addEventListener("contextmenu", function (e) { e.preventDefault(); });
+
+    el.undo.addEventListener("click", function () { dispatch({ type: "undo" }); });
+    el.reset.addEventListener("click", function () {
+      if (typeof el.dialog.showModal === "function") el.dialog.showModal();
+      else if (confirm("Start over? Your current count will be lost.")) dispatch({ type: "reset" });
+    });
+    document.getElementById("reset-confirm").addEventListener("click", function () { dispatch({ type: "reset" }); });
+
+    Array.prototype.forEach.call(document.querySelectorAll(".target-btn"), function (btn) {
+      btn.addEventListener("click", function () {
+        dispatch({ type: "setTarget", value: Number(btn.getAttribute("data-target")) });
+        el.customTarget.value = "";
+      });
+    });
+    el.customTarget.addEventListener("change", function () {
+      dispatch({ type: "setTarget", value: Number(el.customTarget.value) });
+    });
+
+    el.dhikr.value = state.dhikr;
+    el.custom.value = state.customDhikr;
+    function showCustom() { el.custom.classList.toggle("hidden", el.dhikr.value !== "custom"); }
+    showCustom();
+    el.dhikr.addEventListener("change", function () {
+      dispatch({ type: "setDhikr", value: el.dhikr.value, custom: el.custom.value });
+      showCustom();
+      if (el.dhikr.value === "custom") el.custom.focus();
+    });
+    el.custom.addEventListener("input", function () {
+      dispatch({ type: "setDhikr", value: "custom", custom: el.custom.value });
+    });
+
+    el.sound.checked = state.sound;
+    el.haptics.checked = state.haptics;
+    el.sound.addEventListener("change", function () { dispatch({ type: "toggle", key: "sound" }); });
+    el.haptics.addEventListener("change", function () { dispatch({ type: "toggle", key: "haptics" }); });
+
+    // Initial paint + reflect a server-restored target in the custom box.
+    if (state.target !== 33 && state.target !== 99 && state.target !== 100) el.customTarget.value = state.target;
+    paint();
+  })();
+  </script>
+</body>
+</html>

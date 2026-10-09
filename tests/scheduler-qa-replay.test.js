@@ -28,9 +28,18 @@ function stub(spec, exports) {
 stub("./email", {
   sendMail: async ({ to, subject, html }) => {
     const w = W;
-    const m = /Time to prepare for (\w+)/.exec(subject) || /^Did you pray (\w+)\?/.exec(subject);
-    const prayer = m ? m[1] : "?";
-    const type = subject.includes("Time to prepare") ? "reminder" : "followup";
+    // Subjects are now localized; these tests run the user at locale "en"
+    // (see the prayerTimes stub below), so we parse the English templates.
+    const mReminder = /🕌 (.+?) in about (\d+) minutes/.exec(subject);
+    const mFollow = /^Did you pray (.+?)\?/.exec(subject);
+    let prayer, type;
+    if (mReminder) { prayer = mReminder[1]; type = "reminder"; }
+    else if (mFollow) { prayer = mFollow[1]; type = "followup"; }
+    else if (subject.includes("Suhoor")) { prayer = "Fast"; type = "suhoor"; }
+    else if (subject.includes("Iftar")) { prayer = "Fast"; type = "iftar"; }
+    else if (subject.includes("Taraweeh")) { prayer = "Taraweeh"; type = "taraweeh"; }
+    else if (subject.includes("Ayy")) { prayer = "Ayyam"; type = "sunnah_fast"; }
+    else { prayer = "?"; type = "other"; }
     if (w.failRule && w.failRule(prayer, type)) {
       w.emails.push({ at: w.currentTick, prayer, type, result: "smtp-failed" });
       return { success: false, error: "injected SMTP failure" };
@@ -40,10 +49,17 @@ stub("./email", {
   },
   reminderEmailHtml: (u, p, t, lead) => `Be ready for ${p} prayer in ${lead} minutes. (${t})`,
   followupEmailHtml: (u, p, d, yes, no) => `yes=${yes} no=${no}`,
+  sunnahFastEmailHtml: () => `ayyam`,
+  suhoorEmailHtml: () => `suhoor`,
+  iftarEmailHtml: () => `iftar`,
+  taraweehEmailHtml: () => `taraweeh`,
 });
 
 stub("./prayerTimes", {
   getOrFetchTodayTimes: async () => W.row,
+  // Force English so the stub's subject regex is deterministic (subject
+  // localization is covered by the i18n parity unit test instead).
+  resolveLocaleFromCountry: () => "en",
 });
 
 stub("../utils/token", { createResponseToken: () => "sIGNEDtok" });
@@ -116,7 +132,7 @@ const BASE_TIMES = { fajr: "05:00", dhuhr: "12:30", asr: "16:00", maghrib: "18:4
 function makeWorld(opts = {}) {
   return {
     user: { id: "u1", name: "QA", city: "Karachi", country: "Pakistan", notification_prefs: opts.prefs ?? null, group_id: null },
-    row: { date: DATE, timezone: opts.tz || TZ, fetched_at: moment.tz(`${DATE} 00:00`, TZ).toISOString(), ...(opts.times || BASE_TIMES) },
+    row: { date: DATE, timezone: opts.tz || TZ, fetched_at: moment.tz(`${DATE} 00:00`, TZ).toISOString(), ...(opts.times || BASE_TIMES), ...(opts.rowExtra || {}) },
     logRows: [], logKeys: new Set(), responses: new Map(), emails: [],
     currentTick: null, seq: 0,
     failRule: opts.failRule || null,
@@ -194,7 +210,7 @@ test("S1 normal day: exactly 10 emails at the right local times", async () => {
   assert.deepStrictEqual(got, expect);
   // wording + signed links
   const pre = w.emails.find((e) => e.prayer === "Asr" && e.type === "reminder");
-  assert.match(pre.subject, /^🕌 Time to prepare for Asr$/);
+  assert.match(pre.subject, /^🕌 Asr in about 30 minutes$/);
   assert.match(pre.html, /Be ready for Asr prayer in 30 minutes\./);
   const fu = w.emails.find((e) => e.prayer === "Asr" && e.type === "followup");
   assert.strictEqual(fu.subject, "Did you pray Asr?");
@@ -359,4 +375,54 @@ test("DB checks on replayed notifications_log: no dupes, no late sends, ≤10/da
   }
   console.log(`\n== Step3 DB checks (over ${rows.length} replayed rows) ==`);
   console.log(`duplicates=0, late-sends=0, same-tick-doubles=0, sent-today=${rows.filter((r) => r.status === "sent").length}, skipped_stale=${rows.filter((r) => r.status === "skipped_stale").length}`);
+});
+
+// ---- S11 Ramadan mode (opt-in) ------------------------------------------------
+test("S11 Ramadan day: suhoor/iftar/taraweeh emails + a Fast pending row, Ayyam suppressed, ≤1 per group per tick", async () => {
+  const { w } = await runDay({
+    prefs: { ramadan: { enabled: true } },
+    rowExtra: { hijri_month_num: 9, hijri_day: 15, hijri_month: "Ramadan", imsak: "04:50", sunrise: "06:10" },
+  });
+  printTable("S11 timeline", timelineTable(w));
+  const types = sentEmails(w).map((e) => e.type);
+  for (const t of ["suhoor", "iftar", "taraweeh"]) assert.ok(types.includes(t), `expected a ${t} email`);
+  assert.ok(!types.includes("sunnah_fast"), "Ayyam must be suppressed inside Ramadan");
+  // 10 daily + 3 seasonal = 13.
+  assert.strictEqual(sentEmails(w).length, 13, JSON.stringify(sentEmails(w).map((e) => [local(e.at), e.type])));
+  // Two independent per-tick caps: at most one daily AND at most one special.
+  const daily = {}, special = {};
+  for (const e of sentEmails(w)) {
+    const bag = ["reminder", "followup"].includes(e.type) ? daily : special;
+    bag[e.at] = (bag[e.at] || 0) + 1;
+  }
+  assert.ok(Object.values(daily).every((n) => n <= 1), "two daily emails in one tick");
+  assert.ok(Object.values(special).every((n) => n <= 1), "two special emails in one tick");
+  // A Fast response row is created for the day and NEVER auto-marked missed.
+  const fast = [...w.responses.values()].find((r) => r.prayer_name === "Fast");
+  assert.ok(fast, "expected a Fast tracker row");
+  assert.notStrictEqual(fast.status, "missed", "a fast must never be auto-marked missed");
+});
+
+// ---- S12 Ayyam al-Biḍʿ (opt-in, non-Ramadan) ---------------------------------
+test("S12 Ayyam day: exactly one sunnah_fast email, no Ramadan trio, 11 total", async () => {
+  const { w } = await runDay({
+    prefs: { sunnahFast: true },
+    rowExtra: { hijri_month_num: 6, hijri_day: 14, hijri_month: "Dhu al-Qi'dah", imsak: "04:50" },
+  });
+  printTable("S12 timeline", timelineTable(w));
+  const types = sentEmails(w).map((e) => e.type);
+  assert.strictEqual(types.filter((t) => t === "sunnah_fast").length, 1);
+  assert.ok(!types.includes("suhoor") && !types.includes("taraweeh") && !types.includes("iftar"), "Ramadan trio must not fire outside Ramadan");
+  assert.strictEqual(sentEmails(w).length, 11); // 10 daily + 1 Ayyam
+});
+
+// ---- S13 seasonal features default OFF without opt-in -------------------------
+test("S13 Ramadan calendar but NOT opted in → no seasonal emails, still 10", async () => {
+  const { w } = await runDay({
+    prefs: { prayers: {} }, // established prefs, but no ramadan/sunnahFast opt-in
+    rowExtra: { hijri_month_num: 9, hijri_day: 15, hijri_month: "Ramadan", imsak: "04:50" },
+  });
+  const types = sentEmails(w).map((e) => e.type);
+  assert.ok(!types.includes("suhoor") && !types.includes("iftar") && !types.includes("taraweeh"), "no seasonal email without opt-in");
+  assert.strictEqual(sentEmails(w).length, 10);
 });

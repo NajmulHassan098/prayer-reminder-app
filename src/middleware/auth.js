@@ -1,4 +1,7 @@
 const db = require("../db");
+const { t, resolveLocale, dirAttr } = require("../utils/i18n");
+const { resolveLocaleFromCountry } = require("../services/prayerTimes");
+const { formatHijri } = require("../utils/hijri");
 
 async function requireLogin(req, res, next) {
   if (!req.session.userId) {
@@ -20,6 +23,16 @@ async function requireLogin(req, res, next) {
     }
     req.user = user;
     res.locals.user = user;
+    // Expose translation helpers to every authenticated view. locale honors the
+    // user's explicit choice, then country auto-detect, then English.
+    const locale = resolveLocale(user, resolveLocaleFromCountry);
+    res.locals.locale = locale;
+    res.locals.dir = dirAttr(locale);
+    res.locals.isRtl = res.locals.dir === "rtl";
+    res.locals.t = (key, vars) => t(locale, key, vars);
+    // Today's Hijri date (calculated, civil-day convention) for every
+    // authenticated page — the nav shows it and it changes daily on its own.
+    res.locals.hijriToday = formatHijri();
     next();
   } catch (error) {
     console.error(`[auth-middleware] Error in requireLogin:`, error);

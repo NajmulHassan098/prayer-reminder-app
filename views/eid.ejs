@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="<%= typeof locale !== 'undefined' && locale ? locale : 'en' %>" dir="<%= typeof dir !== 'undefined' && dir ? dir : 'ltr' %>">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Eid Mubarak — Prayer Reminder</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Amiri:wght@400;700&family=Noto+Naskh+Arabic:wght@400;700&display=swap" rel="stylesheet">
+  <script src="/theme.js"></script>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body class="bg-slate-950 min-h-screen text-slate-100 antialiased" style="background-image: radial-gradient(60rem 60rem at 110% -10%, rgba(16,185,129,0.12), transparent 60%), radial-gradient(50rem 50rem at -10% 10%, rgba(217,119,6,0.12), transparent 55%);">
+  <%- include('components/navigation', { user, isAdmin: false }) %>
+  <div class="container mx-auto px-4 pt-24 pb-12 max-w-2xl">
+
+    <% if (!isEidDay) { %>
+      <!-- Not Eid yet in your region — no fake celebration -->
+      <div class="bg-slate-900/60 backdrop-blur border border-slate-800 rounded-2xl p-8 text-center shadow-xl shadow-black/20">
+        <div class="text-5xl mb-4">🌙</div>
+        <h1 class="text-2xl font-bold text-white mb-2">Eid is close, in shā' Allāh</h1>
+        <p class="text-slate-400 mb-6">This page lights up on the day of Eid itself (1st of Shawwāl), according to the calendar your reminders use. Keep making the most of these last blessed days.</p>
+        <a href="/dashboard" class="inline-block bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold px-5 py-2.5 rounded-xl transition-colors">Back to dashboard &rarr;</a>
+      </div>
+    <% } else { %>
+      <div class="bg-gradient-to-br from-amber-500/15 to-emerald-500/10 border border-amber-500/30 rounded-2xl p-8 text-center shadow-xl shadow-black/20 mb-6">
+        <div class="text-6xl mb-3">🎉</div>
+        <h1 class="text-3xl font-extrabold text-white mb-2">ʿĪd Mubārak, <%= user.name %>!</h1>
+        <p class="text-amber-200/90 text-lg mb-1">تَقَبَّلَ اللهُ مِنَّا وَمِنْكُمْ</p>
+        <p class="text-slate-300">May Allah accept fasting, prayer, and good deeds from you and from us.</p>
+      </div>
+
+      <div class="bg-slate-900/60 backdrop-blur border border-slate-800 rounded-2xl p-6 mb-6 shadow-xl shadow-black/20">
+        <h2 class="text-lg font-bold text-white mb-3">Your Ramadan, gently counted</h2>
+        <% if (fastsDone > 0) { %>
+          <p class="text-slate-300 mb-4">You recorded <span class="text-emerald-300 font-bold text-xl"><%= fastsDone %></span> <% if (fastsDone === 1) { %>fast<% } else { %>fasts<% } %> this Ramadan 🌙 — every one of them an act of worship Allah sees, whether or not anyone else did.</p>
+        <% } else { %>
+          <p class="text-slate-400 mb-4">You didn't log fasts this month — but what matters is what's between you and Allah. He knows, and His mercy is wider than any record.</p>
+        <% } %>
+        <p class="text-slate-400 text-sm">Today is a day of gratitude, not guilt. Whatever happened, show up thankful — the fasts of Shawwāl (six optional days) are a beautiful way to keep the light going if you're able.</p>
+      </div>
+
+      <div class="text-center">
+        <a href="/dashboard" class="inline-block bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold px-5 py-2.5 rounded-xl transition-colors">Back to dashboard &rarr;</a>
+      </div>
+    <% } %>
+  </div>
+
+  <%- include('components/footer') %>
+</body>
+</html>

@@ -22,6 +22,13 @@ CREATE TABLE IF NOT EXISTS user_profiles (
   -- Per-user email preferences: { "prayers": {Fajr,Dhuhr,Asr,Maghrib,Isha: bool}, pre: bool, post: bool }.
   -- NULL means "all enabled" so existing users keep receiving every reminder until they opt out.
   notification_prefs JSONB,
+  -- Email/UI language: en | ur | tr | ar | id (migration 0005). NULL = auto from
+  -- country, falling back to en. New email FEATURES still default to OFF.
+  locale TEXT,
+  -- General user settings blob (migration 0006): calendar tradition filter,
+  -- moon-sighting day adjustment, tasbeeh counter prefs/state. Normalized by
+  -- src/utils/settings.js; missing keys always get safe defaults.
+  settings JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -32,6 +39,14 @@ CREATE TABLE IF NOT EXISTS prayer_times (
   date TEXT NOT NULL, -- YYYY-MM-DD (local date for that user)
   timezone TEXT, -- IANA tz string returned by Aladhan
   fajr TEXT, dhuhr TEXT, asr TEXT, maghrib TEXT, isha TEXT,
+  -- Hijri calendar + fasting fields returned by Aladhan (migration 0003).
+  -- Nullable; the app degrades gracefully before the migration is applied.
+  hijri_day TEXT,               -- Aladhan Hijri day (civil-day convention)
+  hijri_month_num INT,          -- 1..12; 9 = Ramadan (scheduler gating)
+  hijri_month TEXT,             -- month name for display
+  hijri_year TEXT,
+  imsak TEXT,                   -- absent for some calc methods -> NULL
+  sunrise TEXT,
   fetched_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   UNIQUE(user_id, date)
 );
@@ -41,9 +56,15 @@ CREATE TABLE IF NOT EXISTS responses (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   user_id UUID NOT NULL REFERENCES user_profiles(id) ON DELETE CASCADE,
   group_id UUID,
-  prayer_name TEXT NOT NULL, -- Fajr / Dhuhr / Asr / Maghrib / Isha
+  prayer_name TEXT NOT NULL, -- Fajr / Dhuhr / Asr / Maghrib / Isha, or 'Fast' for a Ramadan sahm
   date TEXT NOT NULL, -- YYYY-MM-DD
   status TEXT NOT NULL DEFAULT 'pending', -- pending | done | missed
+  -- 'salah' (default) or 'fast' (migration 0004). Fast rows are never
+  -- auto-marked missed and are excluded from the 5-per-day prayer counts.
+  kind TEXT NOT NULL DEFAULT 'salah',
+  -- Qaḍā: when the user later made up a missed prayer (migration 0004).
+  -- Private to the user — never shown in group views, never emailed about.
+  made_up_at TIMESTAMP WITH TIME ZONE,
   -- Who/what set the current status, so an auto-marked "missed" (no response) is
   -- distinguishable from one the user tapped. NULL on rows created before this
   -- column existed. manual = dashboard button, email = follow-up link, auto = system.

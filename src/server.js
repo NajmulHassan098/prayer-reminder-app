@@ -8,6 +8,9 @@ const groupRoutes = require("./routes/group");
 const dashboardRoutes = require("./routes/dashboard");
 const responseRoutes = require("./routes/response");
 const profileRoutes = require("./routes/profile");
+const calendarRoutes = require("./routes/calendar");
+const tasbeehRoutes = require("./routes/tasbeeh");
+const hijriRoutes = require("./routes/hijri");
 const scheduler = require("./services/scheduler");
 const { SupabaseSessionStore } = require("./sessionStore");
 const { supabaseAdmin } = require("./supabase");
@@ -107,6 +110,9 @@ app.use(authRoutes);
 app.use(groupRoutes);
 app.use(responseRoutes);
 app.use(profileRoutes);
+app.use(calendarRoutes);
+app.use(tasbeehRoutes);
+app.use(hijriRoutes);
 
 app.use((req, res) => res.status(404).send("Not found"));
 

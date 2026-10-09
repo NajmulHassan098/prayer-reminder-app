@@ -5,7 +5,9 @@ const db = require("../db");
 // bypass RLS to read all user profiles and look up each user's auth email.
 const { supabaseAdmin: supabase } = require("../supabase");
 const { getOrFetchTodayTimes } = require("./prayerTimes");
-const { sendMail, reminderEmailHtml, followupEmailHtml } = require("./email");
+const { sendMail, reminderEmailHtml, followupEmailHtml, sunnahFastEmailHtml, suhoorEmailHtml, iftarEmailHtml, taraweehEmailHtml } = require("./email");
+const { t, resolveLocale } = require("../utils/i18n");
+const { resolveLocaleFromCountry } = require("./prayerTimes");
 const { createResponseToken } = require("../utils/token");
 const { siteOrigin } = require("../utils/siteUrl");
 
@@ -40,6 +42,17 @@ const MIN_RESPONSE_WINDOW_MIN = Number(process.env.MIN_RESPONSE_WINDOW_MINUTES |
 const MIN_PRAYER_GAP_WARN_MIN = Number(process.env.MIN_PRAYER_GAP_WARN_MINUTES || 10);
 // A freshly fetched day's plan is logged once, for a short window after fetch.
 const PLAN_LOG_FRESH_MIN = 6;
+// ---- Seasonal (opt-in) email anchors --------------------------------------
+// All default-OFF features; nothing here fires unless the user's prefs say so.
+// Suhoor email: this many minutes before Imsak (fallback: Fajr).
+const SUHOOR_LEAD_MIN = Number(process.env.SUHOOR_REMINDER_MINUTES || 45);
+// Iftar email: minutes before Maghrib (the meal begins AT maghrib).
+const IFTAR_PREP_MIN = Number(process.env.IFTAR_PREP_MINUTES || 20);
+// Taraweeh email: minutes after Isha — deliberately clear of the Isha
+// follow-up window (delay + grace) so the two never compete.
+const TARAWEEH_DELAY_MIN = Number(process.env.TARAWEEH_DELAY_MINUTES || 45);
+// Ayyam al-Biḍʿ email: local hour (09:00) — clear of every prayer window.
+const AYYAM_HOUR = Number(process.env.AYYAM_REMINDER_HOUR || 9);
 
 /**
  * Interpret a user's stored notification_prefs. A missing/NULL value means
@@ -50,14 +63,23 @@ const PLAN_LOG_FRESH_MIN = 6;
 function notifPrefsOf(user) {
   const p = user.notification_prefs || {};
   const prayers = p.prayers || {};
+  // CONSENT RULE: unlike the original five-prayer prefs (missing = enabled,
+  // because that was historical behavior), every NEW email feature must be
+  // explicitly opted in: missing prefs mean OFF.
+  const ram = p.ramadan || {};
+  const ramadanEnabled = ram.enabled === true;
   return {
     pre: p.pre !== false,
     post: p.post !== false,
     enabled: (name) => prayers[name] !== false,
+    // Ayyam al-Biḍʿ monthly sunnah-fast nudge.
+    sunnahFast: p.sunnahFast === true,
+    ramadanEnabled,
+    ramadanSub: (k) => ramadanEnabled && ram[k] !== false,
   };
 }
 
-async function upsertPendingResponse(userId, groupId, prayerName, date) {
+async function upsertPendingResponse(userId, groupId, prayerName, date, extra) {
   try {
     const existing = await db.getResponse(userId, prayerName, date);
     if (!existing) {
@@ -66,7 +88,8 @@ async function upsertPendingResponse(userId, groupId, prayerName, date) {
         group_id: groupId,
         prayer_name: prayerName,
         date: date,
-        status: 'pending'
+        status: 'pending',
+        ...(extra || {})
       });
       return true; // created
     }
@@ -125,6 +148,55 @@ function buildDayPlan(row) {
   });
 }
 
+// Machine keys used as prayer_name in notifications_log / responses for the
+// seasonal emails. They are TEXT columns, so new types need no schema change —
+// the unique key + send window + atomic claim protect them for free.
+const SPECIAL_KEYS = { ayyam: "Ayyam", suhoor: "Fast", iftar: "Fast", taraweeh: "Taraweeh" };
+
+/**
+ * Build the day's OPT-IN seasonal email candidates from the cached row.
+ * Everything is gated on the Hijri fields stored by migration 0003; rows
+ * without them (pre-migration cache) simply produce no specials.
+ * Returns [{ key, prayer, type, at (Moment), group:'special' }].
+ */
+function buildSpecialEvents(row, prefs) {
+  const out = [];
+  const tz = row.timezone;
+  if (!tz) return out;
+
+  const hDay = Number(row.hijri_day);
+  const hMonth = Number(row.hijri_month_num);
+
+  // Ayyam al-Biḍʿ: 13/14/15 of any lunar month. Suppressed inside Ramadan —
+  // the Ramadan fast already covers it, and we don't stack nudges.
+  if (prefs.sunnahFast && hDay >= 13 && hDay <= 15 && hMonth !== 9) {
+    const at = moment.tz(`${row.date} ${String(AYYAM_HOUR).padStart(2, "0")}:00`, "YYYY-MM-DD HH:mm", tz);
+    if (at.isValid()) out.push({ key: "ayyam", prayer: SPECIAL_KEYS.ayyam, type: "sunnah_fast", at });
+  }
+
+  // Ramadan trio — only when the user opted in AND the day is actually in
+  // the user's own city's Hijri calendar (±1 day regional differences are
+  // automatically consistent per user because each row is fetched locally).
+  if (prefs.ramadanEnabled && hMonth === 9) {
+    const imsakRef = row.imsak && row.imsak !== "00:00" ? row.imsak : row.fajr;
+    if (prefs.ramadanSub("suhoor") && imsakRef) {
+      let at = moment.tz(`${row.date} ${imsakRef}`, "YYYY-MM-DD HH:mm", tz).subtract(SUHOOR_LEAD_MIN, "minutes");
+      // Never before dawn-ish sanity line: if Imsak is missing and the Fajr
+      // lead lands inside the Fajr pre-reminder window, the group cap decides.
+      if (at.isValid()) out.push({ key: "suhoor", prayer: SPECIAL_KEYS.suhoor, type: "suhoor", at });
+    }
+    if (prefs.ramadanSub("iftar") && row.maghrib) {
+      const at = moment.tz(`${row.date} ${row.maghrib}`, "YYYY-MM-DD HH:mm", tz).subtract(IFTAR_PREP_MIN, "minutes");
+      if (at.isValid()) out.push({ key: "iftar", prayer: SPECIAL_KEYS.iftar, type: "iftar", at });
+    }
+    if (prefs.ramadanSub("taraweeh") && row.isha) {
+      const at = moment.tz(`${row.date} ${row.isha}`, "YYYY-MM-DD HH:mm", tz).add(TARAWEEH_DELAY_MIN, "minutes");
+      if (at.isValid()) out.push({ key: "taraweeh", prayer: SPECIAL_KEYS.taraweeh, type: "taraweeh", at });
+    }
+  }
+  return out;
+}
+
 /**
  * Pure decision function: for one user's day plan, decide the exact email
  * actions for THIS tick. No I/O — the tick executes whatever this returns.
@@ -136,50 +208,61 @@ function buildDayPlan(row) {
  *   - now < scheduledAt                      → not due yet, no action;
  *   - scheduledAt <= now < scheduledAt+grace → send candidate;
  *   - now >= scheduledAt+grace               → 'skipped_stale' (never sent).
- * Safeguard: at most ONE email per user per tick — when several are due, the
- * one with the LATER scheduledAt (the more relevant one) is sent and every
- * other candidate is marked 'skipped_stale' with a warn-level reason.
+ * Safeguard: at most ONE email per *group* per tick — 'daily' (the five
+ * prayers' reminder/follow-up) and 'special' (opt-in Ayyam/Ramadan emails).
+ * Normally the two groups are hours apart; in Ramadan that lets at most two
+ * emails share one tick (e.g. Isha follow-up + Taraweeh) while each group
+ * individually keeps the "newest wins, others skipped_stale" rule.
  *
  * @param plan      buildDayPlan() output (moment instants, user's tz-anchored)
  * @param nowIn     current time (Moment or UTC-parseable)
  * @param prefs     notifPrefsOf(user)
  * @param loggedSet Set of "Prayer|type" keys already in notifications_log
  * @param graceMin  send-window width in minutes (defaults to SEND_GRACE_MIN)
- * @returns array of { prayer, type, scheduledAt, windowEndsAt, action, reason }
+ * @param specials  buildSpecialEvents() output (optional)
+ * @returns array of { prayer, type, scheduledAt, windowEndsAt, action, reason, group }
  */
-function planTickActions(plan, nowIn, prefs, loggedSet, graceMin = SEND_GRACE_MIN) {
+function planTickActions(plan, nowIn, prefs, loggedSet, graceMin = SEND_GRACE_MIN, specials = []) {
   const now = moment.isMoment(nowIn) ? nowIn : moment(nowIn);
   const actions = [];
   const due = [];
 
+  const candidates = [];
   for (const ev of plan) {
-    const specs = [
-      { type: "reminder", scheduledAt: ev.preAt, allowed: prefs.pre },
-      { type: "followup", scheduledAt: ev.postAt, allowed: prefs.post },
-    ];
-    for (const s of specs) {
-      if (!s.allowed || !prefs.enabled(ev.name)) continue;
-      if (loggedSet && loggedSet.has(`${ev.name}|${s.type}`)) continue;
-      const windowEndsAt = s.scheduledAt.clone().add(graceMin, "minutes");
-      if (now.isBefore(s.scheduledAt)) continue; // not due yet
-      if (now.isBefore(windowEndsAt)) {
-        due.push({ prayer: ev.name, type: s.type, scheduledAt: s.scheduledAt, windowEndsAt });
-      } else {
-        actions.push({
-          prayer: ev.name, type: s.type, action: "skipped_stale",
-          reason: "window-expired", scheduledAt: s.scheduledAt, windowEndsAt,
-        });
-      }
+    candidates.push(
+      { prayer: ev.name, type: "reminder", scheduledAt: ev.preAt, allowed: prefs.pre && prefs.enabled(ev.name), group: "daily" },
+      { prayer: ev.name, type: "followup", scheduledAt: ev.postAt, allowed: prefs.post && prefs.enabled(ev.name), group: "daily" }
+    );
+  }
+  for (const s of specials || []) {
+    candidates.push({ prayer: s.prayer, type: s.type, scheduledAt: s.at, allowed: true, group: "special" });
+  }
+
+  for (const c of candidates) {
+    if (!c.allowed) continue;
+    if (loggedSet && loggedSet.has(`${c.prayer}|${c.type}`)) continue;
+    const windowEndsAt = c.scheduledAt.clone().add(graceMin, "minutes");
+    if (now.isBefore(c.scheduledAt)) continue; // not due yet
+    if (now.isBefore(windowEndsAt)) {
+      due.push({ ...c, windowEndsAt });
+    } else {
+      actions.push({
+        prayer: c.prayer, type: c.type, group: c.group, action: "skipped_stale",
+        reason: "window-expired", scheduledAt: c.scheduledAt, windowEndsAt,
+      });
     }
   }
 
-  // One-email-per-tick cap: newest scheduledAt wins; older due emails are
-  // stale-by-policy and must not be retried on a later tick.
-  due.sort((a, b) => b.scheduledAt.valueOf() - a.scheduledAt.valueOf());
-  due.forEach((d, i) => {
-    if (i === 0) actions.push({ ...d, action: "send", reason: "" });
-    else actions.push({ ...d, action: "skipped_stale", reason: "tick-cap-older-due" });
-  });
+  // Per-group cap: newest scheduledAt wins inside each group; older due
+  // emails are stale-by-policy and must not be retried on a later tick.
+  for (const group of ["daily", "special"]) {
+    const inGroup = due.filter((d) => d.group === group);
+    inGroup.sort((a, b) => b.scheduledAt.valueOf() - a.scheduledAt.valueOf());
+    inGroup.forEach((d, i) => {
+      if (i === 0) actions.push({ ...d, action: "send", reason: "" });
+      else actions.push({ ...d, action: "skipped_stale", reason: "tick-cap-older-due" });
+    });
+  }
 
   return actions.map((a) => ({ ...a, now }));
 }
@@ -253,6 +336,7 @@ async function tick(nowOverride) {
       const date = row.date;
       const prefs = notifPrefsOf(user);
       const plan = buildDayPlan(row);
+      const specials = buildSpecialEvents(row, prefs);
 
       // Validation logging: dump the plan once, right after the day's times are
       // fetched/updated, so we can confirm each reminder's scheduled timestamp.
@@ -263,7 +347,7 @@ async function tick(nowOverride) {
       // One query builds the handled-set: every (prayer, type) that already has
       // a log row — sent or skipped_stale — is never touched again.
       const loggedSet = await db.getNotificationLogKeys(user.id, date);
-      const actions = planTickActions(plan, now, prefs, loggedSet);
+      const actions = planTickActions(plan, now, prefs, loggedSet, SEND_GRACE_MIN, specials);
 
       for (const a of actions) {
         const base = {
@@ -288,22 +372,47 @@ async function tick(nowOverride) {
         let result = { success: false, error: "auth user lookup failed" };
         const { data: authUser } = await supabase.auth.admin.getUserById(user.id);
         if (authUser && authUser.user) {
+          const to = authUser.user.email;
           if (a.type === "reminder") {
             result = await sendMail({
-              to: authUser.user.email,
-              subject: `🕌 Time to prepare for ${a.prayer}`,
+              to,
+              subject: t(resolveLocale(user, resolveLocaleFromCountry), "email.subject.prayer_soon", { prayer: a.prayer, mins: PRE_REMINDER_MIN }),
               html: reminderEmailHtml(user, a.prayer, ev.timeStr, PRE_REMINDER_MIN),
             });
-          } else {
+          } else if (a.type === "followup") {
             // Follow-up inputs are ONLY: prayer time + FOLLOWUP_DELAY, prefs,
             // dedup. It never depends on the pre-reminder or the next prayer.
             const token = createResponseToken(user.id, a.prayer, date);
             const yesUrl = `${siteOrigin()}/respond?token=${token}&action=yes`;
             const noUrl = `${siteOrigin()}/respond?token=${token}&action=no`;
             result = await sendMail({
-              to: authUser.user.email,
-              subject: `Did you pray ${a.prayer}?`,
+              to,
+              subject: t(resolveLocale(user, resolveLocaleFromCountry), "email.subject.followup", { prayer: a.prayer }),
               html: followupEmailHtml(user, a.prayer, date, yesUrl, noUrl),
+            });
+          } else if (a.type === "sunnah_fast") {
+            result = await sendMail({
+              to,
+              subject: t(resolveLocale(user, resolveLocaleFromCountry), "email.subject.ayyam"),
+              html: sunnahFastEmailHtml(user, row),
+            });
+          } else if (a.type === "suhoor") {
+            result = await sendMail({
+              to,
+              subject: t(resolveLocale(user, resolveLocaleFromCountry), "email.subject.suhoor"),
+              html: suhoorEmailHtml(user, row),
+            });
+          } else if (a.type === "iftar") {
+            result = await sendMail({
+              to,
+              subject: t(resolveLocale(user, resolveLocaleFromCountry), "email.subject.iftar"),
+              html: iftarEmailHtml(user, row),
+            });
+          } else if (a.type === "taraweeh") {
+            result = await sendMail({
+              to,
+              subject: t(resolveLocale(user, resolveLocaleFromCountry), "email.subject.taraweeh"),
+              html: taraweehEmailHtml(user, row),
             });
           }
         }
@@ -313,12 +422,14 @@ async function tick(nowOverride) {
           if (a.type === "reminder") {
             await upsertPendingResponse(user.id, user.group_id, a.prayer, date);
             console.log(`[scheduler] sent reminder user=${user.id} ${a.prayer} at=${ev.at.toISOString()} target=${a.scheduledAt.toISOString()}`);
-          } else {
+          } else if (a.type === "followup") {
             const existing = await db.getResponse(user.id, a.prayer, date);
             if (existing) {
               await db.updateResponse(existing.id, { followup_sent_at: new Date().toISOString() });
             }
             console.log(`[scheduler] sent followup user=${user.id} ${a.prayer} at=${ev.at.toISOString()} target=${a.scheduledAt.toISOString()}`);
+          } else {
+            console.log(`[scheduler] sent ${a.type} user=${user.id} target=${a.scheduledAt.toISOString()}`);
           }
         } else {
           // Send failed: release the claim so the next tick can retry inside the
@@ -349,6 +460,18 @@ async function tick(nowOverride) {
           }
         }
       }
+
+      // Ramadan fast tracking — independent of the Ramadan EMAILS: if the
+      // user's day is in Ramadan (per their own city's Hijri calendar) we open
+      // a 'Fast' pending row at Imsak/Fajr so the dashboard chip can mark it.
+      // Fast rows are kind='fast' and are NEVER auto-marked missed: no one
+      // gets a red "missed fast". The tracking email prefs do not gate this.
+      if (Number(row.hijri_month_num) === 9) {
+        const fastAnchor = moment.tz(`${row.date} ${row.imsak && row.imsak !== "00:00" ? row.imsak : row.fajr}`, "YYYY-MM-DD HH:mm", row.timezone);
+        if (fastAnchor.isValid() && now.isSameOrAfter(fastAnchor)) {
+          await upsertPendingResponse(user.id, user.group_id, "Fast", date, { kind: "fast" });
+        }
+      }
     } catch (err) {
       console.error(`[scheduler] error for user ${user.id}:`, err.message);
     }
@@ -368,4 +491,4 @@ function start() {
 }
 
 // Export both start and tick for flexibility, plus internals for testing.
-module.exports = { start, tick, buildDayPlan, planTickActions, notifPrefsOf, SEND_GRACE_MIN };
+module.exports = { start, tick, buildDayPlan, buildSpecialEvents, planTickActions, notifPrefsOf, SEND_GRACE_MIN, SPECIAL_KEYS };

@@ -6,7 +6,6 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "cron": "node src/cron.js",
     "test": "node --test \"tests/*.test.js\"",
     "refresh-times": "node scripts/refresh-prayer-times.js"
   },

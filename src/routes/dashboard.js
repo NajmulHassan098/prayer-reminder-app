@@ -3,6 +3,8 @@ const db = require("../db");
 const { requireLogin, requireGroupAdmin } = require("../middleware/auth");
 const { getOrFetchTodayTimes, getOrFetchTimesForDate, localDateStrFor, todayStr, computeNextPrayer, getQiblaInfo, getTahajjudWindow } = require("../services/prayerTimes");
 const { REMINDERS, reminderOfTheDay } = require("../data/reminders");
+const { hadithOfTheDay } = require("../data/hadiths");
+const { doneCountsByDate, currentStreak, bestStreakInMonth, monthSummary } = require("../utils/streaks");
 
 const router = express.Router();
 const PRAYERS = ["Fajr", "Dhuhr", "Asr", "Maghrib", "Isha"];
@@ -61,7 +63,7 @@ router.get("/dashboard", requireLogin, async (req, res) => {
     weekly = perMember.map(({ member, responses }) => {
       const days = weekDates.map((d) => ({
         date: d.date,
-        done: responses.filter((r) => r.date === d.date && r.status === "done").length,
+        done: responses.filter((r) => r.date === d.date && r.status === "done" && PRAYERS.includes(r.prayer_name)).length,
       }));
       const totalDone = days.reduce((s, x) => s + x.done, 0);
       return { member: { id: member.id, name: member.name }, days, totalDone };
@@ -77,7 +79,9 @@ router.get("/dashboard", requireLogin, async (req, res) => {
   }
 
   const todayResponses = await db.getResponsesByUser(user.id);
-  const todayResponsesFiltered = todayResponses.filter(r => r.date === date);
+  // Only the five salāh rows drive the grid/progress — Ramadan fast rows
+  // (prayer_name 'Fast', kind 'fast') share the table but are not prayers.
+  const todayResponsesFiltered = todayResponses.filter(r => r.date === date && PRAYERS.includes(r.prayer_name));
   const statusMap = {};
   const sourceMap = {};
   todayResponsesFiltered.forEach((r) => {
@@ -87,6 +91,15 @@ router.get("/dashboard", requireLogin, async (req, res) => {
   
   // Calculate completed prayers for progress indicator
   const completedCount = Object.values(statusMap).filter(status => status === 'done').length;
+
+  // Ramadan fast row + private qaḍā state for today's missed prayers. Both live
+  // on the personal dashboard only — they are never shown in group/admin views.
+  const fastRow = todayResponses.find(r => r.prayer_name === "Fast" && r.date === date) || null;
+  const isRamadan = !!(todayTimes && Number(todayTimes.hijri_month_num) === 9);
+  // Eid al-Fitr: 1 Shawwal (hijri month 10, day 1). Drives a celebratory link.
+  const isEid = !!(todayTimes && Number(todayTimes.hijri_month_num) === 10 && Number(todayTimes.hijri_day) === 1);
+  const qadaMap = {};
+  todayResponsesFiltered.forEach((r) => { qadaMap[r.prayer_name] = !!r.made_up_at; });
 
   const recentHistory = await db.getResponsesByUser(user.id);
   const recentHistoryLimited = recentHistory.slice(0, 25);
@@ -109,9 +122,14 @@ router.get("/dashboard", requireLogin, async (req, res) => {
     recentHistory: recentHistoryLimited,
     isAdmin,
     reminder: reminderOfTheDay(),
+    hadith: hadithOfTheDay(),
     today: date,
     isJummah,
     completedCount,
+    isRamadan,
+    fastRow,
+    isEid,
+    qadaMap,
     groupRows,
     weekly,
     weekDates,
@@ -131,9 +149,10 @@ router.get("/group/activity", requireLogin, async (req, res) => {
     members.map(async (m) => ({ member: m, responses: await db.getResponsesByUser(m.id) }))
   );
 
+  // Fast rows are personal Ramadan trackers — keep them out of the shared log.
   const groupHistory = perMember
     .flatMap(({ member, responses }) =>
-      responses.map((r) => ({ ...r, memberName: member.name }))
+      responses.filter((r) => PRAYERS.includes(r.prayer_name)).map((r) => ({ ...r, memberName: member.name }))
     )
     .sort((a, b) => {
       if (a.date !== b.date) return a.date < b.date ? 1 : -1;
@@ -178,14 +197,33 @@ router.get("/weekly", requireLogin, async (req, res) => {
     weekly = perMember.map(({ member, responses }) => {
       const days = weekDates.map((d) => ({
         date: d.date,
-        done: responses.filter((r) => r.date === d.date && r.status === "done").length,
+        done: responses.filter((r) => r.date === d.date && r.status === "done" && PRAYERS.includes(r.prayer_name)).length,
       }));
       const totalDone = days.reduce((s, x) => s + x.done, 0);
       return { member: { id: member.id, name: member.name }, days, totalDone };
     });
   }
 
-  res.render("weekly", { user, group, memberCount, weekly, weekDates, isAdmin, today: date, PRAYERS });
+  // Personal istiqāmah card (shown whether or not the user is in a group).
+  // Fast rows share the responses table but are not prayers — excluded.
+  const myResponses = await db.getResponsesByUser(user.id);
+  const doneByDate = doneCountsByDate(myResponses, PRAYERS);
+  const streak = {
+    current: currentStreak(doneByDate, date),
+    bestThisMonth: bestStreakInMonth(doneByDate, date.slice(0, 7), date),
+    month: monthSummary(doneByDate, date.slice(0, 7), date),
+  };
+
+  // Private qaḍā figures for this month — a restorative summary, shown only on
+  // the user's own weekly page and never in group views or emails.
+  const monthMissed = myResponses.filter(r =>
+    r.status === "missed" && PRAYERS.includes(r.prayer_name) && r.date.slice(0, 7) === date.slice(0, 7));
+  const qada = {
+    madeUp: monthMissed.filter(r => r.made_up_at).length,
+    remaining: monthMissed.filter(r => !r.made_up_at).length,
+  };
+
+  res.render("weekly", { user, group, memberCount, weekly, weekDates, isAdmin, today: date, PRAYERS, streak, qada });
 });
 
 // Focused "today" page: the animated next-prayer ring, the day's schedule, and
@@ -207,9 +245,29 @@ router.get("/times", requireLogin, async (req, res) => {
 
   const responses = await db.getResponsesByUser(user.id);
   const statusMap = {};
-  responses.filter((r) => r.date === date).forEach((r) => (statusMap[r.prayer_name] = r.status));
+  responses.filter((r) => r.date === date && PRAYERS.includes(r.prayer_name)).forEach((r) => (statusMap[r.prayer_name] = r.status));
 
-  res.render("times", { user, todayTimes, nextPrayer, tahajjud, apiError, statusMap, today: date, PRAYERS, isAdmin: false });
+  res.render("times", { user, todayTimes, nextPrayer, tahajjud, apiError, statusMap, today: date, PRAYERS, hadith: hadithOfTheDay(), isAdmin: false });
+});
+
+// Eid al-Fitr celebration — only meaningful on 1 Shawwal. We gate it on the
+// user's own cached hijri fields (so it stays consistent with their region's
+// Ramadan length) and gently count the fasts they logged that month.
+router.get("/eid", requireLogin, async (req, res) => {
+  const user = req.user;
+  const date = await localDateStrFor(user);
+  let todayTimes = null;
+  try { todayTimes = await getOrFetchTimesForDate(user, date); } catch (err) { /* fall through */ }
+
+  const isEidDay = !!(todayTimes && Number(todayTimes.hijri_month_num) === 10 && Number(todayTimes.hijri_day) === 1);
+  const responses = await db.getResponsesByUser(user.id);
+  // Count fasts marked done over the last 32 days (a safe superset of Ramadan).
+  const cutoff = new Date(`${date}T00:00:00Z`);
+  cutoff.setUTCDate(cutoff.getUTCDate() - 32);
+  const cutoffStr = cutoff.toISOString().slice(0, 10);
+  const fastsDone = responses.filter(r => r.prayer_name === "Fast" && r.status === "done" && r.date > cutoffStr).length;
+
+  res.render("eid", { user, isEidDay, fastsDone, hijriMonth: todayTimes && todayTimes.hijri_month, isAdmin: false });
 });
 
 // Qibla direction + compass for the user's saved city/country.
@@ -235,13 +293,18 @@ router.get("/qibla", requireLogin, async (req, res) => {
 router.post("/prayer/mark", requireLogin, async (req, res) => {
   const { prayer_name, date, status } = req.body;
 
-  if (!PRAYERS.includes(prayer_name)) return res.status(400).send("Unknown prayer.");
-  if (!["done", "missed"].includes(status)) return res.status(400).send("Invalid status.");
+  // Fast rows are Ramadan trackers, not salah: only "done" is valid and the
+  // row must already exist (the scheduler creates it at imsak for the day).
+  const isFast = prayer_name === "Fast";
+  if (!PRAYERS.includes(prayer_name) && !isFast) return res.status(400).send("Unknown prayer.");
+  if (!isFast && !["done", "missed"].includes(status)) return res.status(400).send("Invalid status.");
+  if (isFast && status !== "done") return res.status(400).send("A fast can only be marked as completed.");
   if (!date) return res.status(400).send("Missing date.");
 
   try {
     // Check if response already exists
     const existing = await db.getResponse(req.user.id, prayer_name, date);
+    if (isFast && !existing) return res.status(400).send("No fast row for this day yet.");
     
     if (existing) {
       // Update existing response
@@ -259,6 +322,7 @@ router.post("/prayer/mark", requireLogin, async (req, res) => {
         date: date,
         status: status,
         mark_source: 'manual',
+        ...(isFast ? { kind: 'fast' } : {}),
         responded_at: new Date().toISOString()
       });
     }
@@ -270,6 +334,27 @@ router.post("/prayer/mark", requireLogin, async (req, res) => {
   }
 });
 
+// Discreet qaḍā chip: the user notes a past missed prayer as made up later.
+// Only allowed on their own 'missed' rows, toggles idempotently, and the field
+// is never emailed or shown in any group/admin view — it is a private aid.
+router.post("/prayer/qada", requireLogin, async (req, res) => {
+  const { prayer_name, date } = req.body;
+  if (!PRAYERS.includes(prayer_name)) return res.status(400).send("Unknown prayer.");
+  if (!date) return res.status(400).send("Missing date.");
+
+  try {
+    const existing = await db.getResponse(req.user.id, prayer_name, date);
+    if (!existing || existing.status !== "missed") {
+      return res.status(400).send("Only missed prayers can be marked for qaḍā.");
+    }
+    await db.updateResponse(existing.id, { made_up_at: existing.made_up_at ? null : new Date().toISOString() });
+    res.redirect("/dashboard");
+  } catch (error) {
+    console.error(`[prayer-qada] Error:`, error);
+    res.status(500).send("Failed to update qaḍā status.");
+  }
+});
+
 router.get("/admin", requireLogin, requireGroupAdmin, async (req, res) => {
   const group = req.group;
   const date = await localDateStrFor(req.user);
@@ -277,8 +362,10 @@ router.get("/admin", requireLogin, requireGroupAdmin, async (req, res) => {
   const members = await db.getGroupMembers(group.id);
 
   const rows = await Promise.all(members.map(async (m) => {
+    // Fast/qaḍā rows share the table but are personal — never surfaced in the
+    // group admin views.
     const todayResponses = await db.getResponsesByUser(m.id);
-    const todayResponsesFiltered = todayResponses.filter(r => r.date === date);
+    const todayResponsesFiltered = todayResponses.filter(r => r.date === date && PRAYERS.includes(r.prayer_name));
     const statusMap = {};
     todayResponsesFiltered.forEach((r) => (statusMap[r.prayer_name] = r.status));
 
@@ -309,12 +396,13 @@ router.get("/admin/member/:userId", requireLogin, requireGroupAdmin, async (req,
   }
 
   const history = await db.getResponsesByUser(member.id);
-  const historyLimited = history.slice(0, 100);
+  const prayerHistory = history.filter(r => PRAYERS.includes(r.prayer_name));
+  const historyLimited = prayerHistory.slice(0, 100);
 
-  const done = history.filter(r => r.status === 'done').length;
-  const missed = history.filter(r => r.status === 'missed').length;
-  const pending = history.filter(r => r.status === 'pending').length;
-  const total = history.length;
+  const done = prayerHistory.filter(r => r.status === 'done').length;
+  const missed = prayerHistory.filter(r => r.status === 'missed').length;
+  const pending = prayerHistory.filter(r => r.status === 'pending').length;
+  const total = prayerHistory.length;
   const pct = total > 0 ? Math.round((done / total) * 100) : null;
 
   const totals = { done, missed, pending, total };

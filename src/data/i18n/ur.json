@@ -1,0 +1,58 @@
+{
+  "app.name": "نماز کے اوقات",
+  "app.tagline": " نرم روزانہ نماز کی یاددہانی",
+
+  "nav.dashboard": "ڈیش بورڈ",
+  "nav.times": "آج",
+  "nav.weekly": "ہفتہ وار",
+  "nav.qibla": "قبلہ",
+  "nav.calendar": "کیلنڈر",
+  "nav.group_activity": "گروپ ریکارڈ",
+  "nav.profile": "پروفائل",
+  "nav.notifications": "اطلاعات",
+  "nav.logout": "لاگ آؤٹ",
+
+  "greeting.welcome": "السلام علیکم، {{name}}",
+  "greeting.sub": "آپ کا دن مبارک ہو۔",
+
+  "btn.done": "پڑھی",
+  "btn.missed": "نہیں پڑھی",
+  "btn.view_dashboard": "اپنا ڈیش بورڈ کھولیں",
+  "btn.respond_yes": "ہاں، میں نے پڑھی",
+  "btn.respond_not_yet": "ابھی نہیں",
+
+  "label.city": "شہر",
+  "label.country": "ملک",
+  "label.next_prayer": "اگلی نماز",
+  "label.today": "آج",
+
+  "email.greeting": "السلام علیکم {{name}}،",
+  "email.brand": "نماز کے اوقات",
+  "email.prayer_soon": "{{prayer}} کا وقت قریب ہے — تقریباً {{mins}} منٹ بعد۔",
+  "email.prayer_now": "{{prayer}} کا وقت ہو گیا ہے۔",
+  "email.prayer_passed": "{{prayer}} کا وقت گزر گیا ہے۔",
+  "email.followup_question": "کیا آپ نے {{prayer}} پڑھی؟",
+  "email.followup_nudge": "کوئی دباؤ نہیں — صرف ایک نرم یاد دہانی۔ ریکارڈ کرنا آپ کا سلسلہ برقرار رکھتا ہے اور آپ کے گروپ کے مفید ہوتا ہے۔",
+  "email.tap_to_log": "ریکارڈ کرنے کے لیے بٹن دبائیں (یہ براہِ راست آپ کے اکاؤنٹ سے جڑتا ہے):",
+  "email.view_times": "آج کے تمام اوقات دیکھیں",
+  "email.footer_hint": "آپ ان یاد دہانیوں کو کسی بھی وقت اطلاعات والے صفحے سے بدال سکتے ہیں۔",
+  "email.footer_sent_with": "آپ کی نماز کے خیال سے بھیجا گیا۔",
+  "email.unsub": "اطلاعات منظم کریں",
+
+  "email.subject.prayer_soon": "🕌 {{prayer}} تقریباً {{mins}} منٹ بعد",
+  "email.subject.prayer_now": "🕌 {{prayer}} کا وقت ہو گیا",
+  "email.subject.followup": "کیا آپ نے {{prayer}} پڑھی؟",
+  "email.subject.ayyam": "🌕 ایامِ بیض — 13 تا 15 روزہ",
+  "email.subject.suhoor": "🍳 سحری — وقت کم ہے",
+  "email.subject.iftar": "🌴 افطر مغرب پر",
+  "email.subject.taraweeh": "🌙 آج تراویح",
+
+  "email.ayyam.body": "آج {{hmonth}} کی {{hday}} تاریخ ہے — ایامِ بیض (سفید دن) میں سے۔ نبی ﷺ ہر قمری مہینے کے ان درمیانی دنوں کے روزہ پسند فرماتے تھے۔ اگر آپ استطاعت رکھیں تو ہلکا اور اجر والا سنت ہے۔",
+  "email.suhoor.body": "سحری میں برکت ہے — امساک {{imsak}} سے تھوڑا پہلے کھا پی لیں اور روزے کی نیت کریں۔",
+  "email.iftar.body": "افطر مغرب پر ہے ({{maghrib}})۔ کھجور اور پانی سے افطر کریں؛ یاد رکھیں: روزیدار کی افطر کے وقت دعا رد نہیں ہوتی۔",
+  "email.taraweeh.body": "عشا {{isha}} پر — اس کے بعد تراویح۔ گھر میں پڑھی تھوڑی نماز بھی اجر رکھتی ہے۔ اللہ آپ سے قبول فرمائے۔",
+  "email.adhkar_title": "نماز کے بعد کی سنت سے",
+
+  "lang.label": "زبان",
+  "lang.auto": "خودکار (میرے ملک کے مطابق)"
+}

@@ -75,6 +75,46 @@
         </div>
       </div>
 
+      <!-- Seasonal, opt-in extras -->
+      <div class="bg-slate-900/60 backdrop-blur border border-slate-800 rounded-2xl p-6 shadow-xl shadow-black/20">
+        <h2 class="text-lg font-bold text-white mb-1">Extra reminders <span class="text-emerald-400 text-sm font-semibold">(all off by default)</span></h2>
+        <p class="text-slate-400 text-sm mb-4">Occasional extras for the days that carry extra reward. Nothing here is ever sent unless you switch it on.</p>
+
+        <label class="flex items-start gap-3 py-2 cursor-pointer">
+          <input type="checkbox" name="sunnah_fast" <%= prefs.sunnahFast ? 'checked' : '' %>
+                 class="mt-1 w-5 h-5 rounded bg-slate-800 border-slate-600 text-emerald-500 focus:ring-emerald-500 focus:ring-2">
+          <span>
+            <span class="block text-slate-100 font-medium">🌕 Ayyam al-Biḍʿ — the white days</span>
+            <span class="block text-slate-400 text-sm">One gentle nudge on the 13th–15th of each lunar month to fast the Sunnah.</span>
+          </span>
+        </label>
+
+        <div class="border-t border-slate-800 mt-3 pt-4">
+          <label class="flex items-start gap-3 py-1 cursor-pointer">
+            <input type="checkbox" name="ramadan_enabled" <%= prefs.ramadan.enabled ? 'checked' : '' %>
+                   class="mt-1 w-5 h-5 rounded bg-slate-800 border-slate-600 text-emerald-500 focus:ring-emerald-500 focus:ring-2">
+            <span>
+              <span class="block text-slate-100 font-medium">🌙 Ramadan mode</span>
+              <span class="block text-slate-400 text-sm">Suhoor and Iftar timing emails plus Taraweeh reminders — only on the days your own city's calendar says are Ramadan. Your dashboard also gets a daily fast tracker.</span>
+            </span>
+          </label>
+          <div class="ml-8 mt-3 space-y-2">
+            <label class="flex items-center gap-3 cursor-pointer">
+              <input type="checkbox" name="ramadan_suhoor" <%= prefs.ramadan.suhoor ? 'checked' : '' %> class="w-4 h-4 rounded bg-slate-800 border-slate-600 text-emerald-500 focus:ring-emerald-500">
+              <span class="text-slate-300 text-sm">Suhoor — before dawn (<span dir="rtl">سَحَر</span> blessing)</span>
+            </label>
+            <label class="flex items-center gap-3 cursor-pointer">
+              <input type="checkbox" name="ramadan_iftar" <%= prefs.ramadan.iftar ? 'checked' : '' %> class="w-4 h-4 rounded bg-slate-800 border-slate-600 text-emerald-500 focus:ring-emerald-500">
+              <span class="text-slate-300 text-sm">Iftar — a few minutes before Maghrib</span>
+            </label>
+            <label class="flex items-center gap-3 cursor-pointer">
+              <input type="checkbox" name="ramadan_taraweeh" <%= prefs.ramadan.taraweeh ? 'checked' : '' %> class="w-4 h-4 rounded bg-slate-800 border-slate-600 text-emerald-500 focus:ring-emerald-500">
+              <span class="text-slate-300 text-sm">Taraweeh — after Isha</span>
+            </label>
+          </div>
+        </div>
+      </div>
+
       <button type="submit"
               class="w-full py-3.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold rounded-xl shadow-lg shadow-emerald-500/20 transition-all">
         Save preferences

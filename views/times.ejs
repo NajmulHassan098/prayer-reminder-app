@@ -18,6 +18,15 @@
     <div class="mb-6">
       <h1 class="text-2xl font-bold text-white mb-1">Today</h1>
       <p class="text-slate-400">Live countdown and schedule for <span class="text-slate-300"><%= user.city %>, <%= user.country %></span>.</p>
+      <% if (todayTimes && todayTimes.hijri_day) { %>
+        <p class="text-emerald-300/90 text-sm mt-1" title="Hijri date for today (civil-day convention)">
+          🌙 <%= todayTimes.hijri_day %> <%= todayTimes.hijri_month %> <%= todayTimes.hijri_year %> AH
+        </p>
+      <% } else if (typeof hijriToday !== 'undefined' && hijriToday) { %>
+<p class="text-emerald-300/90 text-sm mt-1" title="Hijri date for today (calculated, civil-day convention)">
+🌙 <%= hijriToday %> AH
+        </p>
+      <% } %>
     </div>
 
     <% if (apiError) { %>
@@ -68,6 +77,20 @@
           <% }); %>
         </div>
         <p class="text-slate-500 text-sm mt-4 text-center">To mark a prayer, use your <a href="/dashboard" class="text-emerald-400 hover:text-emerald-300 underline">dashboard</a>.</p>
+      </div>
+    <% } %>
+
+    <!-- Hadith of the day -->
+    <% if (typeof hadith !== 'undefined' && hadith) { %>
+      <div class="bg-slate-900/60 backdrop-blur border border-slate-800 border-l-4 border-l-indigo-500 rounded-2xl p-6 mb-6 shadow-xl shadow-black/20">
+        <span class="inline-block text-xs font-bold tracking-wider uppercase text-indigo-300 bg-indigo-500/10 ring-1 ring-inset ring-indigo-500/30 px-3 py-1 rounded-full mb-3">Hadith of the day</span>
+        <% if (hadith.arabic) { %>
+          <p class="text-right text-2xl text-slate-100 mb-3 leading-relaxed" style="font-family: 'Amiri', 'Noto Naskh Arabic', serif; direction: rtl;">
+            <%= hadith.arabic %>
+          </p>
+        <% } %>
+        <p class="text-slate-300 italic">&ldquo;<%= hadith.text %>&rdquo;</p>
+        <p class="text-slate-500 text-sm mt-2">— <%= hadith.reference %></p>
       </div>
     <% } %>
 

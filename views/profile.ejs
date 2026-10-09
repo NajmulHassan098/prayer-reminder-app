@@ -37,6 +37,19 @@
     <% } %>
 
     <div class="bg-slate-900/60 backdrop-blur border border-slate-800 rounded-2xl p-6 mb-6 shadow-xl shadow-black/20">
+      <!-- Auto-location: kills the #1 support case (mistyped city). Manual form stays below as the always-available fallback. -->
+      <div class="flex items-center justify-between gap-4 pb-5 mb-5 border-b border-slate-800">
+        <div>
+          <h2 class="text-base font-bold text-white mb-1">Not sure what to type?</h2>
+          <p class="text-slate-400 text-sm">Use your current location and we'll fill in the right city &amp; country automatically.</p>
+        </div>
+        <button type="button" id="locate-btn"
+                class="shrink-0 bg-slate-800 hover:bg-slate-700 border border-slate-600 text-emerald-300 px-4 py-2.5 rounded-xl font-semibold transition-colors whitespace-nowrap">
+          📍 Use my location
+        </button>
+      </div>
+      <div id="locate-status" class="hidden rounded-xl p-3 mb-5 text-sm"></div>
+
       <form method="POST" action="/profile" class="space-y-5">
         <div>
           <label class="block text-slate-300 text-sm font-medium mb-2">Full name</label>
@@ -55,6 +68,17 @@
           <input type="text" name="country" value="<%= user.country || '' %>" required placeholder="e.g. United Kingdom"
                  class="w-full px-4 py-3 bg-slate-800/60 border border-slate-700 rounded-xl text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all">
           <p class="text-slate-500 text-xs mt-2">Tip: write your country in full (e.g. “United Kingdom”, “Pakistan”) so we can pick the right calculation method.</p>
+        </div>
+
+        <div>
+          <label class="block text-slate-300 text-sm font-medium mb-2">Language</label>
+          <select name="language"
+                  class="w-full px-4 py-3 bg-slate-800/60 border border-slate-700 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all">
+            <% languages.forEach(function(l) { %>
+              <option value="<%= l.code %>" <%= (currentLocale || '') === l.code ? 'selected' : '' %>><%= l.label %></option>
+            <% }); %>
+          </select>
+          <p class="text-slate-500 text-xs mt-2">Used for reminder emails and parts of the app. Currently showing: <span class="text-slate-400"><%= effectiveLocale %></span>.<% if (!currentLocale) { %> (auto from your country)<% } %></p>
         </div>
 
         <button type="submit"
@@ -91,5 +115,57 @@
     </div>
 
   </div>
+
+  <script>
+    // Browser geolocation -> POST /profile/locate (server reverse-geocodes,
+    // validates with a trial Aladhan fetch, saves). Denied/unavailable simply
+    // points back at the manual form — no dead ends.
+    (function () {
+      var btn = document.getElementById('locate-btn');
+      var box = document.getElementById('locate-status');
+      if (!btn || !box) return;
+      function show(kind, msg) {
+        box.className = 'rounded-xl p-3 mb-5 text-sm ' + (kind === 'ok'
+          ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-300'
+          : kind === 'err'
+            ? 'bg-red-500/10 border border-red-500/30 text-red-300'
+            : 'bg-slate-800/60 border border-slate-700 text-slate-300');
+        box.textContent = msg;
+      }
+      btn.addEventListener('click', function () {
+        if (!navigator.geolocation) {
+          show('err', 'This browser can\'t share a location — please type your city below.');
+          return;
+        }
+        show('wait', 'Locating…');
+        btn.disabled = true;
+        navigator.geolocation.getCurrentPosition(function (pos) {
+          fetch('/profile/locate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy })
+          }).then(function (r) {
+            return r.json().then(function (j) { return { ok: r.ok, j: j }; });
+          }).then(function (out) {
+            btn.disabled = false;
+            if (out.ok && out.j.ok) {
+              show('ok', 'Set to ' + out.j.city + ', ' + out.j.country + ' — ' + out.j.methodName + '. Reloading…');
+              setTimeout(function () { location.reload(); }, 1200);
+            } else {
+              show('err', out.j.error || 'Could not use that location — please type your city below.');
+            }
+          }).catch(function () {
+            btn.disabled = false;
+            show('err', 'Network hiccup while saving — please try again or type your city below.');
+          });
+        }, function (err) {
+          btn.disabled = false;
+          show('err', err.code === 1
+            ? 'Location permission was declined — no problem, just type your city below.'
+            : 'Your location wasn\'t available right now — please type your city below.');
+        }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 60000 });
+      });
+    })();
+  </script>
 </body>
 </html>

@@ -26,6 +26,18 @@
   <%- include('components/navigation', { isAdmin, user, showSearch: true }) %>
   <div class="container mx-auto px-4 pt-24 pb-12 max-w-4xl">
 
+    <% if (isEid) { %>
+    <!-- Eid al-Fitr banner (1 Shawwal only) -->
+    <div class="bg-gradient-to-br from-amber-500/20 to-emerald-500/15 backdrop-blur border border-amber-500/40 rounded-2xl p-6 mb-6 shadow-xl shadow-black/20 flex items-center justify-between gap-4">
+      <div>
+        <p class="text-xs font-bold tracking-wider uppercase text-amber-300">ʿĪd Mubārak 🎉</p>
+        <h2 class="text-xl font-bold text-white">Today is Eid — Ramadan's journey is complete</h2>
+        <p class="text-slate-300 text-sm mt-1">تَقَبَّلَ اللهُ مِنَّا وَمِنْكُمْ — may Allah accept it from you.</p>
+      </div>
+      <a href="/eid" class="shrink-0 bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold px-4 py-2.5 rounded-xl transition-colors shadow-lg shadow-amber-500/20">Celebrate &rarr;</a>
+    </div>
+    <% } %>
+
     <% if (isJummah) { %>
     <!-- Jumu'ah banner (Fridays only) -->
     <div class="bg-gradient-to-br from-indigo-600/25 to-emerald-600/20 backdrop-blur border border-emerald-500/30 rounded-2xl p-6 mb-6 shadow-xl shadow-black/20">
@@ -59,10 +71,34 @@
       <p class="text-slate-500 text-sm mt-2">— <%= reminder.reference %></p>
     </div>
 
+    <!-- Hadith of the day -->
+    <div class="bg-slate-900/60 backdrop-blur border border-slate-800 border-l-4 border-l-indigo-500 rounded-2xl p-6 mb-6 shadow-xl shadow-black/20">
+      <span class="inline-block text-xs font-bold tracking-wider uppercase text-indigo-300 bg-indigo-500/10 ring-1 ring-inset ring-indigo-500/30 px-3 py-1 rounded-full mb-3">Hadith of the day</span>
+      <% if (hadith.arabic) { %>
+        <p class="text-right text-2xl text-slate-100 mb-3 leading-relaxed" style="font-family: 'Amiri', 'Noto Naskh Arabic', serif; direction: rtl;">
+          <%= hadith.arabic %>
+        </p>
+      <% } %>
+      <p class="text-slate-300 italic text-lg">&ldquo;<%= hadith.text %>&rdquo;</p>
+      <p class="text-slate-500 text-sm mt-2">— <%= hadith.reference %></p>
+    </div>
+
     <!-- Welcome Card -->
     <div class="bg-slate-900/60 backdrop-blur border border-slate-800 rounded-2xl p-6 mb-6 shadow-xl shadow-black/20">
       <h1 class="text-2xl font-bold text-white mb-2">Assalamu Alaikum, <%= user.name %> 👋</h1>
       <p class="text-slate-400"><%= user.city %>, <%= user.country %></p>
+      <% if (todayTimes && todayTimes.hijri_day) { %>
+        <%# Civil-day convention: Aladhan keys the Hijri date to the Gregorian day, %>
+        <%# so between Maghrib and midnight it still shows the earlier part of that hijri day. %>
+        <p class="text-emerald-300/90 text-sm mt-1" title="Hijri date for today (civil-day convention)">
+          🌙 <%= todayTimes.hijri_day %> <%= todayTimes.hijri_month %> <%= todayTimes.hijri_year %> AH
+        </p>
+      <% } else if (typeof hijriToday !== 'undefined' && hijriToday) { %>
+<%# No stored Hijri value yet (row predates migration 0003) — show the calculated one. %>
+<p class="text-emerald-300/90 text-sm mt-1" title="Hijri date for today (calculated, civil-day convention)">
+🌙 <%= hijriToday %> AH
+        </p>
+      <% } %>
     </div>
 
     <!-- Group Status -->
@@ -171,9 +207,44 @@
                   </button>
                 </form>
               </div>
+
+              <% if (isMissed) { %>
+                <!-- Private qaḍā aid — never emailed, never shown to the group -->
+                <form method="POST" action="/prayer/qada" class="mt-2.5">
+                  <input type="hidden" name="prayer_name" value="<%= p %>" />
+                  <input type="hidden" name="date" value="<%= today %>" />
+                  <button type="submit"
+                          class="text-[11px] px-2.5 py-1 rounded-full font-semibold transition-colors select-none
+                                 <%= qadaMap[p] ? 'bg-sky-500/10 text-sky-300 ring-1 ring-inset ring-sky-500/30' : 'bg-slate-700/40 text-slate-400 ring-1 ring-inset ring-slate-600/60 hover:text-sky-300 hover:ring-sky-500/40' %>">
+                    <%= qadaMap[p] ? '🤍 Made up — undo' : '○ Make up later' %>
+                  </button>
+                </form>
+              <% } %>
             </div>
           <% }); %>
         </div>
+
+        <% if (isRamadan) { %>
+          <!-- Ramadan fast tracker: rides the same responses table, personal only -->
+          <div class="mt-4 bg-indigo-500/10 border border-indigo-500/30 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center gap-3">
+            <div class="flex-1">
+              <p class="text-indigo-200 font-bold text-sm">🌙 Today's fast · <%= todayTimes.hijri_month ? todayTimes.hijri_day + ' ' + todayTimes.hijri_month : 'Ramadan' %></p>
+              <p class="text-slate-400 text-xs mt-1">Finished the fast for Allah's sake? Mark it — nobody else sees this.</p>
+            </div>
+            <% if (fastRow && fastRow.status === 'done') { %>
+              <span class="inline-flex items-center px-4 py-2 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-300 ring-1 ring-inset ring-emerald-500/30"><span class="mr-1.5">✓</span> Fast recorded · <%= new Date(fastRow.responded_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) %></span>
+            <% } else if (fastRow) { %>
+              <form method="POST" action="/prayer/mark">
+                <input type="hidden" name="prayer_name" value="Fast" />
+                <input type="hidden" name="date" value="<%= today %>" />
+                <input type="hidden" name="status" value="done" />
+                <button type="submit" class="min-h-[44px] px-5 py-2.5 rounded-xl text-sm font-bold bg-indigo-500/20 text-indigo-200 ring-1 ring-inset ring-indigo-400/40 hover:bg-indigo-500/30 transition-all active:scale-95">🤲 I completed today's fast</button>
+              </form>
+            <% } else { %>
+              <span class="text-xs text-slate-500">The day's fast row appears at imsak time.</span>
+            <% } %>
+          </div>
+        <% } %>
         <p class="text-slate-500 text-sm mt-4 text-center">Times auto-refresh daily and are calculated for <%= user.city %>, <%= user.country %> using the standard method for your country. <a href="/profile" class="text-emerald-400 hover:text-emerald-300 underline">Edit your location</a></p>
       <% } %>
     </div>

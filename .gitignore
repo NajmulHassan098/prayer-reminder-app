@@ -9,7 +9,7 @@ package-lock.json
 .env.supabase
 
 # Database
-data/
+/data/
 *.db
 *.sqlite
 *.sqlite3

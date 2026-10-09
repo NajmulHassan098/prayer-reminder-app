@@ -1,5 +1,15 @@
 const nodemailer = require("nodemailer");
 const { siteOrigin } = require("../utils/siteUrl");
+const { adhkarForDay } = require("../data/adhkar");
+const { t, dirAttr, resolveLocale } = require("../utils/i18n");
+const { resolveLocaleFromCountry } = require("../services/prayerTimes");
+
+const PRAYER_ORDER = ["Fajr", "Dhuhr", "Asr", "Maghrib", "Isha"];
+
+// Effective language for a user's email + a dir attribute for the wrapper.
+function emailLocale(user) {
+  return resolveLocale(user || {}, resolveLocaleFromCountry);
+}
 
 let transporter = null;
 
@@ -88,46 +98,49 @@ function stripHtml(html) {
 }
 
 function reminderEmailHtml(user, prayerName, time, leadMinutes = 30) {
+  const loc = emailLocale(user);
+  const dir = dirAttr(loc);
+  const soon = t(loc, "email.prayer_soon", { prayer: prayerName, mins: leadMinutes });
   return `
     <!DOCTYPE html>
-    <html>
+    <html dir="${dir}" lang="${loc}">
     <head>
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>${prayerName} is coming up</title>
+      <title>${soon}</title>
     </head>
-    <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc;">
+    <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; direction: ${dir};">
       <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff;">
         <!-- Header -->
         <div style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); padding: 32px 24px; text-align: center;">
           <div style="font-size: 48px; margin-bottom: 16px;">🕌</div>
-          <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: 700;">${prayerName} is coming up</h1>
+          <h1 style="color: #ffffff; margin: 0; font-size: 26px; font-weight: 700;">${soon}</h1>
         </div>
         
         <!-- Content -->
         <div style="padding: 32px 24px;">
           <p style="color: #1e293b; font-size: 16px; line-height: 1.6; margin: 0 0 16px;">
-            Assalamu Alaikum, <strong>${user.name}</strong> 👋
+            ${t(loc, "email.greeting", { name: `<strong>${user.name}</strong>` })}
           </p>
           
-          <div style="background-color: #f0fdf4; border-left: 4px solid #10b981; padding: 20px; margin: 24px 0; border-radius: 0 8px 8px 0;">
+          <div style="background-color: #f0fdf4; border-${dir === 'rtl' ? 'right' : 'left'}: 4px solid #10b981; padding: 20px; margin: 24px 0; border-radius: ${dir === 'rtl' ? '8px 0 0 8px' : '0 8px 8px 0'};">
             <p style="color: #166534; margin: 0; font-size: 18px; font-weight: 600;">
-              Be ready for ${prayerName} prayer in ${leadMinutes} minutes.
+              ${t(loc, "email.prayer_now", { prayer: prayerName })}
             </p>
             <p style="color: #166534; margin: 8px 0 0; font-size: 16px;">
-              ${prayerName} today is at <strong>${time}</strong> in ${user.city}.
+              ${t(loc, "label.today")} · <strong>${time}</strong> — ${user.city}
             </p>
           </div>
           
           <p style="color: #64748b; font-size: 14px; line-height: 1.6; margin: 24px 0 0;">
-            You'll receive a follow-up message after the prayer time to help you track whether you've completed it.
+            ${t(loc, "email.followup_nudge")}
           </p>
         </div>
         
         <!-- Footer -->
         <div style="background-color: #f1f5f9; padding: 24px; text-align: center; border-top: 1px solid #e2e8f0;">
           <p style="color: #64748b; font-size: 12px; margin: 0;">
-            Prayer Reminder App · ${new Date().toLocaleDateString()}
+            ${t(loc, "email.brand")} · ${new Date().toLocaleDateString()} — ${t(loc, "email.footer_sent_with")}
           </p>
         </div>
       </div>
@@ -137,51 +150,57 @@ function reminderEmailHtml(user, prayerName, time, leadMinutes = 30) {
 }
 
 function followupEmailHtml(user, prayerName, date, yesUrl, noUrl) {
+  const loc = emailLocale(user);
+  const dir = dirAttr(loc);
+  const question = t(loc, "email.subject.followup", { prayer: prayerName });
   return `
     <!DOCTYPE html>
-    <html>
+    <html dir="${dir}" lang="${loc}">
     <head>
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>Did you pray ${prayerName}?</title>
+      <title>${question}</title>
     </head>
-    <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc;">
+    <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; direction: ${dir};">
       <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff;">
         <!-- Header -->
         <div style="background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%); padding: 32px 24px; text-align: center;">
           <div style="font-size: 48px; margin-bottom: 16px;">🤲</div>
-          <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: 700;">Did you pray ${prayerName}?</h1>
+          <h1 style="color: #ffffff; margin: 0; font-size: 26px; font-weight: 700;">${question}</h1>
         </div>
         
         <!-- Content -->
         <div style="padding: 32px 24px;">
           <p style="color: #1e293b; font-size: 16px; line-height: 1.6; margin: 0 0 16px;">
-            Assalamu Alaikum, <strong>${user.name}</strong>
+            ${t(loc, "email.greeting", { name: `<strong>${user.name}</strong>` })}
           </p>
           
           <p style="color: #64748b; font-size: 15px; line-height: 1.6; margin: 0 0 24px;">
-            Just checking in on your <strong>${prayerName}</strong> prayer for <strong>${date}</strong>.
+            ${t(loc, "email.followup_nudge")} <strong>${date}</strong>.
           </p>
           
           <!-- Action Buttons -->
           <div style="margin: 32px 0; text-align: center;">
-            <a href="${yesUrl}" style="display: inline-block; background-color: #10b981; color: #ffffff; padding: 16px 32px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 16px; margin: 0 8px 12px 0;">
-              ✅ Yes, I prayed
+            <a href="${yesUrl}" style="display: inline-block; background-color: #10b981; color: #ffffff; padding: 16px 32px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 16px; margin: 0 ${dir === 'rtl' ? '0 0 12px 8px' : '0 8px 12px 0'};">
+              ✅ ${t(loc, "btn.respond_yes")}
             </a>
             <a href="${noUrl}" style="display: inline-block; background-color: #ef4444; color: #ffffff; padding: 16px 32px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 16px; margin: 0 0 12px 0;">
-              ❌ Not yet
+              ❌ ${t(loc, "btn.respond_not_yet")}
             </a>
           </div>
           
           <p style="color: #94a3b8; font-size: 12px; line-height: 1.5; margin: 24px 0 0; text-align: center;">
-            This link is unique to you and expires automatically for your security.
+            ${t(loc, "email.tap_to_log")}
           </p>
+
+          <!-- Post-prayer dhikr, rotating per prayer per day -->
+          ${adhkarFooter(prayerName, date)}
         </div>
         
         <!-- Footer -->
         <div style="background-color: #f1f5f9; padding: 24px; text-align: center; border-top: 1px solid #e2e8f0;">
           <p style="color: #64748b; font-size: 12px; margin: 0;">
-            Prayer Reminder App · ${new Date().toLocaleDateString()}
+            ${t(loc, "email.brand")} · ${new Date().toLocaleDateString()} — ${t(loc, "email.footer_sent_with")}
           </p>
         </div>
       </div>
@@ -351,11 +370,127 @@ function resetPasswordEmailHtml(name, resetUrl) {
   `;
 }
 
+// Small rotating dhikr block appended inside the follow-up email body.
+// Kept as a helper so future locales (i18n) can translate around it.
+function adhkarFooter(prayerName, date) {
+  const idx = Math.max(0, PRAYER_ORDER.indexOf(prayerName));
+  const dhikr = adhkarForDay(idx, date);
+  return `
+          <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin: 32px 0 0; text-align: center;">
+            <p style="color: #94a3b8; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; margin: 0 0 10px;">From the Sunnah after prayer</p>
+            <p dir="rtl" style="color: #334155; font-size: 17px; line-height: 2; margin: 0 0 10px; font-family: 'Amiri', 'Noto Naskh Arabic', serif;">${dhikr.arabic}</p>
+            <p style="color: #64748b; font-size: 13px; line-height: 1.6; margin: 0 0 6px; font-style: italic;">&ldquo;${dhikr.text}&rdquo;</p>
+            <p style="color: #94a3b8; font-size: 11px; margin: 0;">&mdash; ${dhikr.reference}</p>
+          </div>
+  `;
+}
+
+// Shared shell for the seasonal (Ramadan/Ayyam) emails — same structure as the
+// daily templates, with a per-feature accent color. Copy stays gentle/inviting.
+function seasonalEmailHtml({ emoji, title, greeting, lines, dir = "ltr", loc = "en", accent = "#7c3aed", gradFrom = "#8b5cf6", gradTo = "#6d28d9" }) {
+  const bodyLines = lines
+    .map((l) => `<p style="color: ${l.muted ? "#64748b" : "#1e293b"}; font-size: ${l.big ? "18px" : "15px"}; line-height: 1.7; margin: 0 0 16px; ${l.center ? "text-align:center;" : ""}">${l.html}</p>`)
+    .join("\n          ");
+  return `
+    <!DOCTYPE html>
+    <html dir="${dir}" lang="${loc}">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>${title}</title>
+    </head>
+    <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f8fafc; direction: ${dir};">
+      <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff;">
+        <div style="background: linear-gradient(135deg, ${gradFrom} 0%, ${gradTo} 100%); padding: 32px 24px; text-align: center;">
+          <div style="font-size: 48px; margin-bottom: 16px;">${emoji}</div>
+          <h1 style="color: #ffffff; margin: 0; font-size: 26px; font-weight: 700;">${title}</h1>
+        </div>
+        <div style="padding: 32px 24px;">
+          <p style="color: #1e293b; font-size: 16px; line-height: 1.6; margin: 0 0 16px;">${greeting}</p>
+          ${bodyLines}
+        </div>
+        <div style="background-color: #f1f5f9; padding: 24px; text-align: center; border-top: 1px solid #e2e8f0;">
+          <p style="color: #64748b; font-size: 12px; margin: 0;">
+            ${t(loc, "email.brand")} · ${new Date().toLocaleDateString()} — ${t(loc, "email.footer_sent_with")}
+          </p>
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+}
+
+// Ayyam al-Biḍʿ: the 13th/14th/15th of the lunar month — the white days.
+function sunnahFastEmailHtml(user, row) {
+  const loc = emailLocale(user); const dir = dirAttr(loc);
+  return seasonalEmailHtml({
+    dir, loc,
+    emoji: "🌕",
+    title: t(loc, "email.subject.ayyam"),
+    greeting: t(loc, "email.greeting", { name: `<strong>${user.name}</strong>` }),
+    lines: [
+      { html: t(loc, "email.ayyam.body", { hday: row.hijri_day, hmonth: row.hijri_month || "the lunar month" }) },
+      { html: `If today works for you, make the intention before ${row.fajr} and join the fast. If it doesn't — no weight, no guilt — tomorrow is another day. 🌙`, muted: true },
+    ],
+  });
+}
+
+function suhoorEmailHtml(user, row) {
+  const loc = emailLocale(user); const dir = dirAttr(loc);
+  const imsak = row.imsak && row.imsak !== "00:00" ? row.imsak : row.fajr;
+  return seasonalEmailHtml({
+    dir, loc,
+    emoji: "🍳",
+    title: t(loc, "email.subject.suhoor"),
+    greeting: t(loc, "email.greeting", { name: `<strong>${user.name}</strong>` }),
+    gradFrom: "#0d9488", gradTo: "#065f46",
+    lines: [
+      { html: t(loc, "email.suhoor.body", { imsak }), big: true, center: true },
+      { html: `The Prophet ﷺ said: "Take suhoor, for in suhoor there is blessing." (Sahih al-Bukhari & Muslim)`, muted: true },
+    ],
+  });
+}
+
+function iftarEmailHtml(user, row) {
+  const loc = emailLocale(user); const dir = dirAttr(loc);
+  return seasonalEmailHtml({
+    dir, loc,
+    emoji: "🌴",
+    title: t(loc, "email.subject.iftar"),
+    greeting: t(loc, "email.greeting", { name: `<strong>${user.name}</strong>` }),
+    gradFrom: "#b45309", gradTo: "#78350f",
+    lines: [
+      { html: t(loc, "email.iftar.body", { maghrib: row.maghrib }), big: true },
+      { html: `ذَهَبَ الظَّمَأُ وَابْتَلَّتِ الْعُرُوقُ وَثَبَتَ الْأَجْرُ إِنْ شَاءَ اللَّهُ — the thirst is gone, the veins are moistened, and the reward is confirmed, if Allah wills.`, muted: true },
+    ],
+  });
+}
+
+function taraweehEmailHtml(user, row) {
+  const loc = emailLocale(user); const dir = dirAttr(loc);
+  return seasonalEmailHtml({
+    dir, loc,
+    emoji: "🌙",
+    title: t(loc, "email.subject.taraweeh"),
+    greeting: t(loc, "email.greeting", { name: `<strong>${user.name}</strong>` }),
+    gradFrom: "#4338ca", gradTo: "#312e81",
+    lines: [
+      { html: t(loc, "email.taraweeh.body", { isha: row.isha }) },
+      { html: `Whoever stands (in prayer) in Ramadan out of faith and hoping for reward, his previous sins will be forgiven. — Sahih al-Bukhari`, muted: true },
+    ],
+  });
+}
+
 module.exports = { 
   sendMail, 
   reminderEmailHtml, 
   followupEmailHtml,
   invitationEmailHtml,
   groupAddedEmailHtml,
-  resetPasswordEmailHtml
+  resetPasswordEmailHtml,
+  sunnahFastEmailHtml,
+  suhoorEmailHtml,
+  iftarEmailHtml,
+  taraweehEmailHtml,
+  adhkarFooter
 };

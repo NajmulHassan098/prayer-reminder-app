@@ -67,6 +67,24 @@ function resolveCalcMethod(country) {
   return METHOD;
 }
 
+// Default email/UI language for a country. Keyed on the same lowercased English
+// country spellings as COUNTRY_METHOD. Anything unmapped returns null so the
+// caller falls back to English — we only auto-switch where we're confident.
+const COUNTRY_LOCALE = {
+  pakistan: "ur", india: "ur", bangladesh: "ur",
+  turkey: "tr",
+  "saudi arabia": "ar", uae: "ar", "united arab emirates": "ar", egypt: "ar",
+  jordan: "ar", palestine: "ar", iraq: "ar", syria: "ar", morocco: "ar",
+  algeria: "ar", tunisia: "ar", libya: "ar", sudan: "ar", yemen: "ar",
+  qatar: "ar", kuwait: "ar", bahrain: "ar", oman: "ar", lebanon: "ar",
+  indonesia: "id", malaysia: "id", brunei: "id",
+};
+
+function resolveLocaleFromCountry(country) {
+  if (!country) return null;
+  return COUNTRY_LOCALE[String(country).trim().toLowerCase()] || null;
+}
+
 /**
  * Calls the free Aladhan API to get today's 5 prayer times for a city/country.
  * Docs: https://aladhan.com/prayer-times-api
@@ -92,6 +110,12 @@ async function fetchTimesFromApi(city, country, date) {
   // Timings come back like "05:12 (PKT)" sometimes — strip anything after a space.
   const clean = (t) => (t || "").split(" ")[0];
 
+  // The Hijri block was always there; we simply weren't storing it. Month NUMBER
+  // (1..12) is what the scheduler gates Ramadan/Ayyam al-Biḍʿ on; the display
+  // string carries diacritics so we keep both. Guarded so an API shape change
+  // degrades to "no Hijri" rather than throwing inside the fetch.
+  const hijri = (res.data.data.date && res.data.data.date.hijri) || {};
+
   return {
     timezone,
     fajr: clean(timings.Fajr),
@@ -99,6 +123,12 @@ async function fetchTimesFromApi(city, country, date) {
     asr: clean(timings.Asr),
     maghrib: clean(timings.Maghrib),
     isha: clean(timings.Isha),
+    imsak: clean(timings.Imsak) || null,
+    sunrise: clean(timings.Sunrise) || null,
+    hijri_day: hijri.day || null,
+    hijri_month_num: hijri.month && hijri.month.number ? Number(hijri.month.number) : null,
+    hijri_month: hijri.month ? hijri.month.str || hijri.month.en || null : null,
+    hijri_year: hijri.year || null,
   };
 }
 
@@ -178,6 +208,12 @@ async function getOrFetchTimesForDate(user, date) {
     asr: times.asr,
     maghrib: times.maghrib,
     isha: times.isha,
+    imsak: times.imsak,
+    sunrise: times.sunrise,
+    hijri_day: times.hijri_day,
+    hijri_month_num: times.hijri_month_num,
+    hijri_month: times.hijri_month,
+    hijri_year: times.hijri_year,
     fetched_at: new Date().toISOString()
   });
 
@@ -366,9 +402,60 @@ async function getQiblaInfo(city, country) {
   };
 }
 
+// ISO2 country code -> the English country spelling our COUNTRY_METHOD map is
+// keyed on. Nominatim localizes `address.country` ("İstanbul", "إسلام آباد")
+// but always returns `country_code` in ISO2 — keying off that keeps the calc
+// method detection working for every language of address.
+const COUNTRY_CODE_NAME = {
+  pk: "Pakistan", in: "India", bd: "Bangladesh", lk: "Sri Lanka", np: "Nepal",
+  af: "Afghanistan", mv: "Maldives", za: "South Africa", uz: "Uzbekistan",
+  tm: "Turkmenistan", tj: "Tajikistan", kg: "Kyrgyzstan", kz: "Kazakhstan", az: "Azerbaijan",
+  us: "United States", ca: "Canada", mx: "Mexico",
+  sa: "Saudi Arabia", ae: "United Arab Emirates", qa: "Qatar", kw: "Kuwait",
+  bh: "Bahrain", om: "Oman", ye: "Yemen",
+  tr: "Turkey", eg: "Egypt", sd: "Sudan", ly: "Libya", tn: "Tunisia", dz: "Algeria",
+  ma: "Morocco", so: "Somalia", jo: "Jordan", ps: "Palestine", il: "Israel",
+  lb: "Lebanon", sy: "Syria", iq: "Iraq", ng: "Nigeria", ml: "Mali", ne: "Niger",
+  td: "Chad", dj: "Djibouti", km: "Comoros", ir: "Iran", fr: "France",
+  gb: "United Kingdom", ie: "Ireland", de: "Germany", nl: "Netherlands", be: "Belgium",
+  es: "Spain", it: "Italy", pt: "Portugal", se: "Sweden", no: "Norway", dk: "Denmark",
+  fi: "Finland", pl: "Poland", at: "Austria", ch: "Switzerland", gr: "Greece",
+  ro: "Romania", bg: "Bulgaria", cz: "Czech Republic", ua: "Ukraine", by: "Belarus",
+  ru: "Russia", id: "Indonesia", my: "Malaysia", sg: "Singapore", bn: "Brunei",
+  th: "Thailand", ph: "Philippines", au: "Australia", nz: "New Zealand", jp: "Japan",
+  cn: "China", kr: "South Korea",
+};
+
+// Pure: turns a Nominatim reverse-geocode payload into { city, country }.
+// Exported separately so tests can feed fixtures without HTTP.
+function normalizeReverseGeocode(nominatimRes) {
+  const a = nominatimRes && nominatimRes.address;
+  if (!a) return null;
+  const cc = (a.country_code || "").toLowerCase();
+  const country = COUNTRY_CODE_NAME[cc] || a.country;
+  const city = a.city || a.town || a.village || a.municipality || a.suburb || a.county || a.state;
+  if (!city || !country) return null;
+  return { city, country, countryCode: cc };
+}
+
+/**
+ * Reverse-geocode browser coordinates to a city/country pair (user-initiated
+ * only — one call per profile save, comfortably inside Nominatim's 1 req/s
+ * policy). Returns { city, country, countryCode } or null.
+ */
+async function reverseGeocode(lat, lng) {
+  const res = await axios.get("https://nominatim.openstreetmap.org/reverse", {
+    params: { lat, lon: lng, format: "jsonv2", zoom: 10, addressdetails: 1 },
+    headers: { "User-Agent": "PrayerReminderApp/1.0 (https://prayer-app-sepia.vercel.app)" },
+    timeout: 10000,
+  });
+  return normalizeReverseGeocode(res.data);
+}
+
 module.exports = {
   fetchTimesFromApi,
   resolveCalcMethod,
+  resolveLocaleFromCountry,
   resolveUserTimezone,
   localDateStrFor,
   getOrFetchTodayTimes,
@@ -376,6 +463,8 @@ module.exports = {
   refreshAllUsersToday,
   computeNextPrayer,
   getQiblaInfo,
+  reverseGeocode,
+  normalizeReverseGeocode,
   getTahajjudWindow,
   todayStr,
   tomorrowStr,

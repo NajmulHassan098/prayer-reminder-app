@@ -1,0 +1,221 @@
+[
+  {
+    "id": "islamic-new-year",
+    "hijriMonth": 1,
+    "hijriDays": [1],
+    "traditions": ["sunni", "shia"],
+    "type": "observance",
+    "name": "Islamic New Year",
+    "description": "The first of Muharram opens a new year in the Islamic lunar calendar — a day for reflection and duʿāʾ."
+  },
+  {
+    "id": "ashura",
+    "hijriMonth": 1,
+    "hijriDays": [10],
+    "traditions": ["sunni", "shia"],
+    "type": "solemn",
+    "name": "ʿĀshūrāʾ — 10th of Muharram",
+    "description": "Sunni Muslims mark it with fasting in remembrance of Allāh's relief of Mūsā; Shīʿa Muslims mourn the martyrdom of Imam al-Ḥusayn at Karbalāʾ. Observed differently by each tradition, with equal reverence.",
+    "disputed": "Minority narrations place related events on 9 or 11 Muharram."
+  },
+  {
+    "id": "arbain",
+    "hijriMonth": 2,
+    "hijriDays": [20],
+    "traditions": ["shia"],
+    "type": "solemn",
+    "name": "Arbaʿīn",
+    "description": "Forty days after ʿĀshūrāʾ; Shīʿa Muslims mourn the martyrdom of Imam al-Ḥusayn, many undertaking pilgrimage to Karbalāʾ.",
+    "disputed": "Some scholars compute the fortieth day as 17 Ṣafar."
+  },
+  {
+    "id": "prophet-passing-shia",
+    "hijriMonth": 2,
+    "hijriDays": [28],
+    "traditions": ["shia"],
+    "type": "solemn",
+    "name": "Passing of the Prophet ﷺ",
+    "description": "The Prophet Muḥammad ﷺ passed away on 28 Ṣafar in 11 AH (Shīʿa chronology; also cited in some Sunni histories).",
+    "disputed": "Sunni majority chronology places the passing on 12 Rabīʿ al-Awwal."
+  },
+  {
+    "id": "mawlid-sunni",
+    "hijriMonth": 3,
+    "hijriDays": [12],
+    "traditions": ["sunni"],
+    "type": "festival",
+    "name": "Mawlīd al-Nabī ﷺ",
+    "description": "The birth of the Prophet ﷺ on 12 Rabīʿ al-Awwal, marked by Sunni Muslims with recitation, charity and gatherings.",
+    "disputed": "Date based on majority chronology; observance itself is a matter of scholarly difference."
+  },
+  {
+    "id": "mawlid-shia",
+    "hijriMonth": 3,
+    "hijriDays": [17],
+    "traditions": ["shia"],
+    "type": "festival",
+    "name": "Mawlīd al-Nabī ﷺ (Jaʿfarī)",
+    "description": "Shīʿa Muslims of the Jaʿfarī school mark the Prophet's ﷺ birth on 17 Rabīʿ al-Awwal — the Prophet ﷺ and Imam Jaʿfar al-Ṣādiq share this birthday in this tradition."
+  },
+  {
+    "id": "sacred-month-rajab",
+    "hijriMonth": 7,
+    "hijriDays": [1],
+    "traditions": ["sunni", "shia"],
+    "type": "observance",
+    "name": "Entry into Rajab",
+    "description": "Rajab is one of the four sacred months in which warfare was traditionally prohibited."
+  },
+  {
+    "id": "imam-ali-birth",
+    "hijriMonth": 7,
+    "hijriDays": [13],
+    "traditions": ["shia"],
+    "type": "festival",
+    "name": "Birthday of Imam ʿAlī ibn Abī Ṭālib",
+    "description": "Shīʿa Muslims celebrate the birth of Imam ʿAlī — uniquely born, in their tradition, inside the Kaʿba.",
+    "disputed": "Some sources give 3 Rajab."
+  },
+  {
+    "id": "isra-miraj",
+    "hijriMonth": 7,
+    "hijriDays": [27],
+    "traditions": ["sunni", "shia"],
+    "type": "night",
+    "name": "al-Isrāʾ wal-Miʿrāj",
+    "description": "The Night Journey and Ascension, when the five daily prayers were ordained. Marked with night prayer and recitation.",
+    "disputed": "The date is not established in the Qurʾān or strongest ḥadīths; 27 Rajab is the popular convention — many scholars discourage fixing it."
+  },
+  {
+    "id": "imam-husayn-birth",
+    "hijriMonth": 8,
+    "hijriDays": [3],
+    "traditions": ["shia"],
+    "type": "festival",
+    "name": "Birthday of Imam al-Ḥusayn",
+    "description": "Birth of the Prophet's ﷺ grandson, honored across traditions; Shīʿa Muslims mark it with gatherings."
+  },
+  {
+    "id": "mid-shaban",
+    "hijriMonth": 8,
+    "hijriDays": [15],
+    "traditions": ["sunni", "shia"],
+    "type": "night",
+    "name": "Mid-Shaʿbān (Niṣf Shaʿbān)",
+    "description": "The middle night of Shaʿbān; some observe it with prayer and seeking forgiveness.",
+    "disputed": "Its special status is disputed among scholars; Shīʿa Muslims also mark it as the birthday of Imam al-Mahdī."
+  },
+  {
+    "id": "ramadan-begins",
+    "hijriMonth": 9,
+    "hijriDays": [1],
+    "traditions": ["sunni", "shia"],
+    "type": "festival",
+    "name": "First day of Ramaḍān",
+    "description": "The month of fasting begins — subject to local moon sighting, so this date varies by region."
+  },
+  {
+    "id": "imam-ali-shahadat",
+    "hijriMonth": 9,
+    "hijriDays": [19],
+    "traditions": ["shia"],
+    "type": "solemn",
+    "name": "Martyrdom of Imam ʿAlī",
+    "description": "Imam ʿAlī was struck by Ibn Muljam while praying at Kūfa, and passed away in this period.",
+    "disputed": "Sources differ between 19 and 21 Ramaḍān for the strike and passing."
+  },
+  {
+    "id": "qadr-sunni",
+    "hijriMonth": 9,
+    "hijriDays": [21, 23, 25, 27, 29],
+    "traditions": ["sunni"],
+    "type": "night",
+    "name": "Laylat al-Qadr — search the odd nights",
+    "description": "The Night of Power is sought in the odd nights of Ramaḍān's last ten; many traditions emphasize the 27th, but its exact night is deliberately unknown.",
+    "disputed": "Never fix one date — the strongest guidance is to seek it across the odd nights."
+  },
+  {
+    "id": "qadr-shia",
+    "hijriMonth": 9,
+    "hijriDays": [19, 21, 23],
+    "traditions": ["shia"],
+    "type": "night",
+    "name": "Laylat al-Qadr (Shīʿa)",
+    "description": "Shīʿa Muslims observe the nights of 19, 21 and 23 Ramaḍān as candidate Nights of Power, with the 23rd emphasized; the 21st also marks the martyrdom of Imam ʿAlī in these narrations."
+  },
+  {
+    "id": "eid-fitr",
+    "hijriMonth": 10,
+    "hijriDays": [1],
+    "traditions": ["sunni", "shia"],
+    "type": "festival",
+    "name": "ʿĪd al-Fiṭr",
+    "description": "The festival of breaking the fast — Ṣalāt al-ʿĪd, zakāt al-fiṭr distributed beforehand, and celebration. Begins the evening the new moon is sighted."
+  },
+  {
+    "id": "imam-sadiq-passing",
+    "hijriMonth": 10,
+    "hijriDays": [25],
+    "traditions": ["shia"],
+    "type": "solemn",
+    "name": "Passing of Imam Jaʿfar al-Ṣādiq",
+    "description": "Imam al-Ṣādiq (d. 148 AH), eponym of the Jaʿfarī school of jurisprudence, passed away in Madīna.",
+    "disputed": "Some sources give 25 Shawwāl, others 10 Rajab."
+  },
+  {
+    "id": "tarwiyah",
+    "hijriMonth": 12,
+    "hijriDays": [8],
+    "traditions": ["sunni"],
+    "type": "observance",
+    "name": "Yawm al-Tarwiyah",
+    "description": "Pilgrims gather at Minā on the eighth of Dhū al-Ḥijjah, preparing for ʿArafah."
+  },
+  {
+    "id": "arafah",
+    "hijriMonth": 12,
+    "hijriDays": [9],
+    "traditions": ["sunni", "shia"],
+    "type": "observance",
+    "name": "Yawm ʿArafah",
+    "description": "The day of standing at ʿArafah — the climax of Ḥajj. Sunni Muslims not in Ḥajj commonly fast it.",
+    "disputed": "Shīʿa tradition treats ʿArafah day as a ʿīd and discourages fasting it."
+  },
+  {
+    "id": "eid-adha",
+    "hijriMonth": 12,
+    "hijriDays": [10],
+    "traditions": ["sunni", "shia"],
+    "type": "festival",
+    "name": "ʿĪd al-Aḍā",
+    "description": "The festival of sacrifice, honoring Ibrāhīm's devotion — ṣalāh, sacrifice, and meat shared widely. Follows the Day of ʿArafah for most; for pilgrims, the rites of Minā."
+  },
+  {
+    "id": "tashreeq",
+    "hijriMonth": 12,
+    "hijriDays": [11, 12, 13],
+    "traditions": ["sunni", "shia"],
+    "type": "observance",
+    "name": "Days of Tashrīq",
+    "description": "The days following ʿĪd al-Aḍḥā spent at Minā during Ḥajj; days of eating, drinking and remembrance."
+  },
+  {
+    "id": "ghadir-khumm",
+    "hijriMonth": 12,
+    "hijriDays": [18],
+    "traditions": ["shia"],
+    "type": "festival",
+    "name": "ʿĪd Ghadīr Khumm",
+    "description": "Shīʿa Muslims mark the Prophet's ﷺ declaration at Ghadīr Khumm — 'whoever I am his mawlā, ʿAlī is his mawlā' — as the appointment of Imam ʿAlī. Sunni Muslims affirm the event at Ghadīr but understand the statement differently."
+  },
+  {
+    "id": "ayyam-al-bid",
+    "hijriMonth": null,
+    "hijriDays": [13, 14, 15],
+    "everyMonth": true,
+    "traditions": ["sunni", "shia"],
+    "type": "sunnah",
+    "name": "Ayyām al-Bīḍ — the White Days",
+    "description": "Sunnah fasting on the 13th, 14th and 15th of every lunar month, when the moon is full."
+  }
+]

@@ -1,0 +1,58 @@
+{
+  "app.name": "Namaz Vakitleri",
+  "app.tagline": " nazik günlük namaz hatırlatmaları",
+
+  "nav.dashboard": "Panel",
+  "nav.times": "Bugün",
+  "nav.weekly": "Haftalık",
+  "nav.qibla": "Kıble",
+  "nav.calendar": "Takvim",
+  "nav.group_activity": "Grup kaydı",
+  "nav.profile": "Profil",
+  "nav.notifications": "Bildirimler",
+  "nav.logout": "Çıkış",
+
+  "greeting.welcome": "Es-selâmü aleyküm, {{name}}",
+  "greeting.sub": "Günün mübarek olsun.",
+
+  "btn.done": "Kıldım",
+  "btn.missed": "Kılamadım",
+  "btn.view_dashboard": "Panelini aç",
+  "btn.respond_yes": "Evet, kıldım",
+  "btn.respond_not_yet": "Henüz",
+
+  "label.city": "Şehir",
+  "label.country": "Ülke",
+  "label.next_prayer": "Sonraki namaz",
+  "label.today": "Bugün",
+
+  "email.greeting": "Es-selâmü aleyküm {{name}},",
+  "email.brand": "Namaz Vakitleri",
+  "email.prayer_soon": "{{prayer}} vakti yaklaşıyor — yaklaşık {{mins}} dakika sonra.",
+  "email.prayer_now": "{{prayer}} vakti girdi.",
+  "email.prayer_passed": "{{prayer}} vakti çıktı.",
+  "email.followup_question": "{{prayer}} namazını kıldın mı?",
+  "email.followup_nudge": "Baskı yok — sadece nazik bir hatırlatma. Kaydetmek serinizi korur ve grubunuza yardımcı olur.",
+  "email.tap_to_log": "Kaydetmek için bir düğmeye dokun (doğrudan hesabına bağlanır):",
+  "email.view_times": "Bugünün tüm vakitlerini gör",
+  "email.footer_hint": "Bu hatırlatmaları istediğin zaman bildirimler sayfasından değiştirebilirsin.",
+  "email.footer_sent_with": "Namazın için özenle gönderildi.",
+  "email.unsub": "Bildirimleri yönet",
+
+  "email.subject.prayer_soon": "🕌 {{prayer}} yaklaşık {{mins}} dakika sonra",
+  "email.subject.prayer_now": "🕌 {{prayer}} vakti girdi",
+  "email.subject.followup": "{{prayer}} namazını kıldın mı?",
+  "email.subject.ayyam": "🌕 Eyyâmü'l-bîz — 13–15. gün orucu",
+  "email.subject.suhoor": "🍳 Sahur — vakit dar",
+  "email.subject.iftar": "🌴 İftar akşam vakti",
+  "email.subject.taraweeh": "🌙 Bu gece teravih",
+
+  "email.ayyam.body": "Bugün {{hmonth}} ayının {{hday}}. günü — Eyyâmü'l-bîz (beyaz günler) günlerinden. Peygamber ﷺ her kamerî ayın bu ortasındaki günleri oruç tutmayı severdi. Gücün yeterse hafif ve sevaplı bir sünnettir.",
+  "email.suhoor.body": "Sahurda bereket var — imsak vakti {{imsak}}'dan biraz önce kalk. Ye, iç ve oruca niyet et.",
+  "email.iftar.body": "İftar akşam vakti ({{maghrib}}). Orucunu hurma ve su ile aç; hatırla: oruçlunun iftardaki duası reddedilmez.",
+  "email.taraweeh.body": "Yatsı {{isha}}'de — ardından teravih. Evde kılınan kısa bir namaz bile sevaptır. Allah sizden kabul etsin.",
+  "email.adhkar_title": "Namaz sonrası sünnetten",
+
+  "lang.label": "Dil",
+  "lang.auto": "Otomatik (ülkeme göre)"
+}

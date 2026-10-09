@@ -23,9 +23,26 @@ function verifyPasswordResetToken(token) {
   return payload;
 }
 
+// Long-lived, purpose-scoped token for the personal .ics calendar feed.
+// Calendar clients store the subscription URL, so it must not expire on a
+// short clock like the response links; rotation happens by changing TOKEN_SECRET.
+function createCalendarToken(userId) {
+  return jwt.sign({ userId, purpose: "calendar" }, SECRET);
+}
+
+function verifyCalendarToken(token) {
+  const payload = jwt.verify(token, SECRET); // throws if invalid
+  if (payload.purpose !== "calendar") {
+    throw new Error("Invalid token purpose");
+  }
+  return payload;
+}
+
 module.exports = {
   createResponseToken,
   verifyResponseToken,
   createPasswordResetToken,
   verifyPasswordResetToken,
+  createCalendarToken,
+  verifyCalendarToken,
 };

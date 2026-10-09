@@ -1,0 +1,58 @@
+{
+  "app.name": "Waktu Shalat",
+  "app.tagline": " pengingat shalat harian yang lembut",
+
+  "nav.dashboard": "Dasbor",
+  "nav.times": "Hari Ini",
+  "nav.weekly": "Mingguan",
+  "nav.qibla": "Kiblat",
+  "nav.calendar": "Kalender",
+  "nav.group_activity": "Log Grup",
+  "nav.profile": "Profil",
+  "nav.notifications": "Notifikasi",
+  "nav.logout": "Keluar",
+
+  "greeting.welcome": "Assalamu'alaikum, {{name}}",
+  "greeting.sub": "Semoga harimu diberkahi.",
+
+  "btn.done": "Sudah Shalat",
+  "btn.missed": "Belum Shalat",
+  "btn.view_dashboard": "Buka dasbordmu",
+  "btn.respond_yes": "Ya, saya sudah shalat",
+  "btn.respond_not_yet": "Belum",
+
+  "label.city": "Kota",
+  "label.country": "Negara",
+  "label.next_prayer": "Shalat berikutnya",
+  "label.today": "Hari ini",
+
+  "email.greeting": "Assalamu'alaikum {{name}},",
+  "email.brand": "Waktu Shalat",
+  "email.prayer_soon": "Waktu {{prayer}} semakin dekat — sekitar {{mins}} menit lagi.",
+  "email.prayer_now": "Waktu {{prayer}} telah tiba.",
+  "email.prayer_passed": "Waktu {{prayer}} telah berlalu.",
+  "email.followup_question": "Apakah kamu sudah shalat {{prayer}}?",
+  "email.followup_nudge": "Tanpa tekanan — hanya pengingat lembut. Mencatat menjaga konsistensimu dan membantu grupmu.",
+  "email.tap_to_log": "Ketuk tombol untuk mencatat (tautan ini langsung ke akunmu):",
+  "email.view_times": "Lihat semua waktu hari ini",
+  "email.footer_hint": "Kamu dapat mengubah pengingat ini kapan saja dari halaman notifikasi.",
+  "email.footer_sent_with": "Dikirim dengan penuh perhatian untuk shalatmu.",
+  "email.unsub": "Kelola notifikasi",
+
+  "email.subject.prayer_soon": "🕌 {{prayer}} sekitar {{mins}} menit lagi",
+  "email.subject.prayer_now": "🕌 Telah tiba waktu {{prayer}}",
+  "email.subject.followup": "Apakah kamu sudah shalat {{prayer}}?",
+  "email.subject.ayyam": "🌕 Ayyamul Bidh — puasa tanggal 13–15",
+  "email.subject.suhoor": "🍳 Sahur — waktunya singkat",
+  "email.subject.iftar": "🌴 Berbuka saat Maghrib",
+  "email.subject.taraweeh": "🌙 Tarawih malam ini",
+
+  "email.ayyam.body": "Hari ini adalah tanggal {{hday}} {{hmonth}} — salah satu Ayyamul Bidh (hari-hari putih). Nabi ﷺ biasa berpuasa pada pertengahan setiap bulan hijriah. Sebuah sunnah yang ringan dan berpahala jika kamu mampu.",
+  "email.suhoor.body": "Sahur itu penuh berkah — selesaikan sebelum imsak pada pukul {{imsak}}. Makan, minumlah, dan niatkan puasa.",
+  "email.iftar.body": "Berbuka saat Maghrib ({{maghrib}}). Berbukalah dengan kurma dan air, dan ingatlah: doa orang yang berpuasa saat berbuka tidak tertolak.",
+  "email.taraweeh.body": "Isya pada pukul {{isha}} — setelahnya ada Tarawih. Meski shalat singkat di rumah tetap berpahala. Semoga Allah menerimanya darimu.",
+  "email.adhkar_title": "Dari sunnah setelah shalat",
+
+  "lang.label": "Bahasa",
+  "lang.auto": "Otomatis (dari negaraku)"
+}

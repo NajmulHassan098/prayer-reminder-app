@@ -1,0 +1,58 @@
+{
+  "app.name": "مواقيت الصلاة",
+  "app.tagline": " تذكير لطيف بالصلاة كل يوم",
+
+  "nav.dashboard": "الرئيسية",
+  "nav.times": "اليوم",
+  "nav.weekly": "أسبوعي",
+  "nav.qibla": "القبلة",
+  "nav.calendar": "التقويم",
+  "nav.group_activity": "سجل المجموعة",
+  "nav.profile": "الملف الشخصي",
+  "nav.notifications": "التنبيهات",
+  "nav.logout": "تسجيل الخروج",
+
+  "greeting.welcome": "السلام عليكم، {{name}}",
+  "greeting.sub": "ليكن يومك مباركًا.",
+
+  "btn.done": "صلّيت",
+  "btn.missed": "لم أصلّ",
+  "btn.view_dashboard": "افتح صفحتك الرئيسية",
+  "btn.respond_yes": "نعم، صلّيت",
+  "btn.respond_not_yet": "بعد",
+
+  "label.city": "المدينة",
+  "label.country": "الدولة",
+  "label.next_prayer": "الصلاة القادمة",
+  "label.today": "اليوم",
+
+  "email.greeting": "السلام عليكم {{name}}،",
+  "email.brand": "مواقيت الصلاة",
+  "email.prayer_soon": "اقترب وقت {{prayer}} — بعد حوالي {{mins}} دقيقة.",
+  "email.prayer_now": "حان الآن وقت {{prayer}}.",
+  "email.prayer_passed": "انقضى وقت {{prayer}}.",
+  "email.followup_question": "هل صلّيت {{prayer}}؟",
+  "email.followup_nudge": "بلا ضغط — مجرد تذكير لطيف. التسجيل يحافظ على استمراريتك ويفيد مجموعتك.",
+  "email.tap_to_log": "اضغط زرًا لتسجيلها (يربط مباشرة بحسابك):",
+  "email.view_times": "عرض كل مواقيت اليوم",
+  "email.footer_hint": "يمكنك تغيير هذه التذكيرات في أي وقت من صفحة التنبيهات.",
+  "email.footer_sent_with": "أُرسلت اعتناءً بصلاتك.",
+  "email.unsub": "إدارة التنبيهات",
+
+  "email.subject.prayer_soon": "🕌 {{prayer}} بعد حوالي {{mins}} دقيقة",
+  "email.subject.prayer_now": "🕌 حان وقت {{prayer}}",
+  "email.subject.followup": "هل صلّيت {{prayer}}؟",
+  "email.subject.ayyam": "🌕 أيام البيض — صيام الثالث عشر والرابع عشر والخامس عشر",
+  "email.subject.suhoor": "🍳 السحور — الوقت ضيق",
+  "email.subject.iftar": "🌴 الإفطار عند المغرب",
+  "email.subject.taraweeh": "🌙 التراويح الليلة",
+
+  "email.ayyam.body": "اليوم هو {{hday}} من {{hmonth}} — من أيام البيض (الأيام البيضاء). كان النبي ﷺ يحب صيام هذه الأيام الوسطى من كل شهر قمري. سُنّة خفيفة وأجر عظيم إن استطعت.",
+  "email.suhoor.body": "السحور بركة — اترك وقتًا يسيرًا قبل الإمساك عند {{imsak}}. كُل واشرب وانوِ الصيام.",
+  "email.iftar.body": "الإفطار عند المغرب ({{maghrib}}). أفطر على تمر وماء، وتذكّر: دعوة الصائم عند فطره لا تُرد.",
+  "email.taraweeh.body": "العشاء عند {{isha}} — تتبعه التراويح. حتى القليل من الصلاة في البيت يُحتسب. تقبّل الله منك.",
+  "email.adhkar_title": "من سنّة ما بعد الصلاة",
+
+  "lang.label": "اللغة",
+  "lang.auto": "تلقائي (من بلدي)"
+}

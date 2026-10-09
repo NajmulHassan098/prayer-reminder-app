@@ -21,6 +21,39 @@
         <span class="text-xs text-slate-500 font-medium uppercase tracking-wider"><%= today %></span>
       </div>
 
+      <!-- Your istiqāmah — consistency, celebrated gently; never a guilt score -->
+      <% if (typeof streak !== 'undefined' && streak) { %>
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 my-5">
+        <div class="bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-4 text-center">
+          <p class="text-3xl font-extrabold text-emerald-300"><%= streak.current %></p>
+          <p class="text-xs text-slate-400 mt-1">days in a row with at least one prayer 🌙</p>
+        </div>
+        <div class="bg-slate-800/40 border border-slate-700 rounded-2xl p-4 text-center">
+          <p class="text-3xl font-extrabold text-slate-200"><%= streak.bestThisMonth %></p>
+          <p class="text-xs text-slate-400 mt-1">best run this month — every day counts</p>
+        </div>
+        <div class="bg-slate-800/40 border border-slate-700 rounded-2xl p-4 text-center">
+          <p class="text-3xl font-extrabold text-slate-200"><%= streak.month.totalDone %></p>
+          <p class="text-xs text-slate-400 mt-1">prayers this month · <%= streak.month.fullDays %> full <span class="text-slate-500">(5/5)</span> days</p>
+        </div>
+      </div>
+      <p class="text-slate-500 text-xs mb-4">Small and consistent is beloved. If a day slipped, it's behind you — today is fresh.</p>
+
+      <% if (typeof qada !== 'undefined' && qada && (qada.madeUp > 0 || qada.remaining > 0)) { %>
+        <div class="bg-slate-800/40 border border-slate-700 rounded-2xl p-4 mb-4 flex flex-wrap items-center gap-x-6 gap-y-2">
+          <span class="text-xs text-slate-400 uppercase tracking-wider font-semibold">This month's qaḍā</span>
+          <% if (qada.madeUp > 0) { %>
+            <span class="text-sm text-sky-300 font-semibold">🤍 <%= qada.madeUp %> made up</span>
+          <% } %>
+          <% if (qada.remaining > 0) { %>
+            <span class="text-sm text-slate-400"><%= qada.remaining %> still to make up — no rush, one at a time.</span>
+          <% } else { %>
+            <span class="text-sm text-emerald-300">Nothing outstanding. Alḥamdulillāh.</span>
+          <% } %>
+        </div>
+      <% } %>
+      <% } %>
+
       <% if (!group) { %>
         <p class="text-slate-400 mt-3 mb-2">You're not in a group yet, so there's no shared weekly table to show.</p>
         <a href="/group/new" class="inline-block mt-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 px-5 py-2.5 rounded-xl font-semibold transition-colors shadow-lg shadow-emerald-500/20">Create a group</a>

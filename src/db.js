@@ -99,6 +99,21 @@ const db = {
       .eq('id', userId)
       .select()
       .single();
+    // Migration 0005 (locale) not applied yet? Strip just that field and retry so
+    // profile/notification saves never break while the DB catches up.
+    if (error && isUndefinedColumnError(error, 'locale')) {
+      console.warn('[db] user_profiles.locale missing — run migration 0005. Retrying without it.');
+      const { locale, ...rest } = updates;
+      return this.updateUserProfile(userId, rest);
+    }
+    // Migration 0006 (settings) not applied yet? Same degrade for the
+    // calendar/tasbeeh prefs blob — the features keep working from localStorage
+    // and the browser simply can't persist the server copy until it's applied.
+    if (error && isUndefinedColumnError(error, 'settings')) {
+      console.warn('[db] user_profiles.settings missing — run migration 0006. Retrying without it.');
+      const { settings, ...rest } = updates;
+      return this.updateUserProfile(userId, rest);
+    }
     if (error) throw error;
     return data;
   },
@@ -110,6 +125,15 @@ const db = {
       .insert(prayerTimeData)
       .select()
       .single();
+    // Migration 0003 not applied yet? Drop only the new columns and retry, so
+    // times keep caching (the app's core function) while the DB catches up.
+    if (error && isUndefinedColumnError(error, 'hijri_day')) {
+      console.warn('[db] prayer_times hijri/imsak columns missing — run migration 0003. Retrying without them.');
+      const { imsak, sunrise, hijri_day, hijri_month_num, hijri_month, hijri_year, ...rest } = prayerTimeData;
+      const retry = await supabase.from('prayer_times').insert(rest).select().single();
+      if (retry.error) throw retry.error;
+      return retry.data;
+    }
     if (error) throw error;
     return data;
   },
@@ -172,6 +196,13 @@ const db = {
       if (retry.error) throw retry.error;
       return retry.data;
     }
+    // Migration 0004 (kind/made_up_at) not applied yet? Strip and retry via the
+    // same degrade chain so fast rows and qaḍā writes never break the tick.
+    if (error && isUndefinedColumnError(error, 'kind')) {
+      console.warn('[db] responses.kind missing — run migration 0004. Retrying without it.');
+      const { kind, ...rest } = responseData;
+      return this.createResponse(rest);
+    }
     if (error) throw error;
     return data;
   },
@@ -221,6 +252,11 @@ const db = {
       const retry = await supabase.from('responses').update(rest).eq('id', id).select().single();
       if (retry.error) throw retry.error;
       return retry.data;
+    }
+    if (error && isUndefinedColumnError(error, 'made_up_at')) {
+      console.warn('[db] responses.made_up_at missing — run migration 0004. Retrying without it.');
+      const { made_up_at, ...rest } = updates;
+      return this.updateResponse(id, rest);
     }
     if (error) throw error;
     return data;
