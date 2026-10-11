@@ -284,7 +284,8 @@ const db = {
   },
 
   // Set of "prayer|type" keys that already have a log row for this user's LOCAL
-  // date. Used by the scheduler to skip handled events in one query per user.
+  // date. Kept for back-compat / diagnostics; the scheduler now uses
+  // getNotificationLogStatuses so it can distinguish retryable rows.
   async getNotificationLogKeys(userId, date) {
     const { data, error } = await supabase
       .from('notifications_log')
@@ -295,23 +296,57 @@ const db = {
     return new Set((data || []).map((r) => `${r.prayer_name}|${r.type}`));
   },
 
+  // Map of "prayer|type" -> { status, claimed_at } for one user's local date.
+  // The scheduler builds its handled-set from this (see scheduler.handledSetFrom)
+  // so 'failed' / abandoned claims can be retried while the window is open.
+  // If the claimed_at column (migration 0008) is not present yet, degrade to
+  // selecting without it — every non-terminal row then reads as in-flight, which
+  // reproduces the old conservative behaviour instead of erroring.
+  async getNotificationLogStatuses(userId, date) {
+    let query = supabase.from('notifications_log').select('prayer_name, type, status').eq('user_id', userId).eq('date', date);
+    let { data, error } = await query;
+    if (error && isUndefinedColumnError(error, 'status')) {
+      // Pre-migration 0002 DB: no status column; every row is a completed send.
+      const retry = await supabase.from('notifications_log').select('prayer_name, type').eq('user_id', userId).eq('date', date);
+      if (retry.error) throw retry.error;
+      const m = new Map();
+      for (const r of retry.data || []) m.set(`${r.prayer_name}|${r.type}`, { status: 'sent', claimed_at: null });
+      return m;
+    }
+    if (error) throw error;
+    const map = new Map();
+    for (const r of data || []) map.set(`${r.prayer_name}|${r.type}`, { status: r.status, claimed_at: null });
+    // Best-effort claimed_at enrichment (skipped silently if column missing).
+    const withClaim = await supabase.from('notifications_log').select('prayer_name, type, claimed_at').eq('user_id', userId).eq('date', date);
+    if (!withClaim.error) {
+      for (const r of withClaim.data || []) {
+        const k = `${r.prayer_name}|${r.type}`;
+        if (map.has(k)) map.get(k).claimed_at = r.claimed_at || null;
+      }
+    }
+    return map;
+  },
+
   // Insert-first claim on (user_id, prayer_name, date, type): ON CONFLICT DO
-  // NOTHING, so two overlapping ticks (or serverless cron + in-process cron)
-  // can never both "win" the same email. Returns the inserted row when this
-  // caller owns the event, or null when a row already exists (sent/skipped).
-  // status: 'sending' (claimed, email about to go out) | 'skipped_stale'.
-  // scheduled_at: the UTC instant the email was scheduled for (diagnostics).
+  // NOTHING, so two overlapping ticks can never both "win" the same fresh email.
+  // Returns the inserted row when this caller owns the event, or null when a row
+  // already exists (which then goes through retryClaimNotificationLog).
+  // entry.status is 'sending' for a send claim; scheduled_at/claimed_at carry the
+  // due instant and the claim instant. Degrades if status/scheduled_at/claimed_at
+  // columns are absent so the dedup contract still holds on an un-migrated DB.
   async claimNotificationLog(entry) {
     const { data, error } = await supabase
       .from('notifications_log')
       .upsert(entry, { onConflict: 'user_id,prayer_name,date,type', ignoreDuplicates: true })
       .select();
-    if (error && (isUndefinedColumnError(error, 'status') || isUndefinedColumnError(error, 'scheduled_at'))) {
-      console.warn('[db] notifications_log.status/scheduled_at missing — run the schema migration. Retrying without them.');
-      const { status, scheduled_at, ...rest } = entry;
+    if (error && (isUndefinedColumnError(error, 'status') || isUndefinedColumnError(error, 'scheduled_at') || isUndefinedColumnError(error, 'claimed_at'))) {
+      const strip = { ...entry };
+      if (isUndefinedColumnError(error, 'status')) delete strip.status;
+      if (isUndefinedColumnError(error, 'scheduled_at')) delete strip.scheduled_at;
+      if (isUndefinedColumnError(error, 'claimed_at')) delete strip.claimed_at;
       const retry = await supabase
         .from('notifications_log')
-        .upsert(rest, { onConflict: 'user_id,prayer_name,date,type', ignoreDuplicates: true })
+        .upsert(strip, { onConflict: 'user_id,prayer_name,date,type', ignoreDuplicates: true })
         .select();
       if (retry.error) throw retry.error;
       return retry.data && retry.data.length ? retry.data[0] : null;
@@ -320,35 +355,103 @@ const db = {
     return data && data.length ? data[0] : null;
   },
 
+  // Atomically claim an EXISTING retryable row (status 'failed', or a
+  // 'pending'/'sending' left abandoned > abandonMin minutes) for a fresh send
+  // attempt. A single UPDATE guarded on the retryable status returns the row to
+  // exactly ONE concurrent caller (row lock serialises the others, whose WHERE no
+  // longer matches). Returns the claimed row, or null when nothing was claimable.
+  async retryClaimNotificationLog(base, claimedAtIso, abandonMin = 2) {
+    const key = {
+      user_id: base.user_id, prayer_name: base.prayer_name,
+      date: base.date, type: base.type,
+    };
+    const cutoff = new Date(Date.now() - abandonMin * 60000).toISOString();
+    // 1) failed → sending
+    let { data, error } = await supabase
+      .from('notifications_log')
+      .update({ status: 'sending', claimed_at: claimedAtIso })
+      .eq('user_id', key.user_id).eq('prayer_name', key.prayer_name)
+      .eq('date', key.date).eq('type', key.type)
+      .eq('status', 'failed')
+      .select();
+    if (!error && data && data.length) return data[0];
+    // 2) abandoned pending/sending → sending (only possible with claimed_at)
+    const { data: ab, error: abErr } = await supabase
+      .from('notifications_log')
+      .update({ status: 'sending', claimed_at: claimedAtIso })
+      .eq('user_id', key.user_id).eq('prayer_name', key.prayer_name)
+      .eq('date', key.date).eq('type', key.type)
+      .in('status', ['pending', 'sending'])
+      .lt('claimed_at', cutoff)
+      .select();
+    if (!abErr && ab && ab.length) return ab[0];
+    return null;
+  },
+
+  // Write a terminal SKIP outcome (skipped_stale / skipped_superseded /
+  // skipped_already_logged). Insert-first when there is no row; if a row already
+  // exists, convert it only when it is a retryable/in-flight state ('failed',
+  // 'pending', 'sending') — never overwrite a real 'sent' or an earlier skip.
+  // Returns a truthy row when this call wrote/converted the skip, else null.
+  async resolveSkippedNotificationLog(entry) {
+    const inserted = await this.claimNotificationLog(entry);
+    if (inserted) return inserted;
+    const { data, error } = await supabase
+      .from('notifications_log')
+      .update({ status: entry.status, scheduled_at: entry.scheduled_at })
+      .eq('user_id', entry.user_id).eq('prayer_name', entry.prayer_name)
+      .eq('date', entry.date).eq('type', entry.type)
+      .in('status', ['failed', 'pending', 'sending'])
+      .select();
+    if (error && (isUndefinedColumnError(error, 'status') || isUndefinedColumnError(error, 'scheduled_at'))) return null;
+    if (error) throw error;
+    return data && data.length ? data[0] : null;
+  },
+
   // Claimed row became a real send. In dry-run mode (SCHEDULER_DRY_RUN=1) the
   // caller still ends up here: the row is stamped 'sent' with a real sent_at so
   // the atomic-claim dedup keeps working and no email can double-send even
-  // after dry-run mode is switched off for the day. The tick itself records
-  // `dry_run: true` on the cron_heartbeat row, which is the single source of
-  // truth for "was this day's pipeline exercised without touching SMTP?".
+  // after dry-run mode is switched off for the day.
   async markNotificationLogSent(id) {
     const { error } = await supabase
       .from('notifications_log')
-      .update({ status: 'sent', sent_at: new Date().toISOString() })
+      .update({ status: 'sent', sent_at: new Date().toISOString(), claimed_at: new Date().toISOString() })
       .eq('id', id);
     if (error && isUndefinedColumnError(error, 'status')) return; // pre-migration DB: claim row itself is the dedup
+    if (error && isUndefinedColumnError(error, 'claimed_at')) {
+      const { error: e2 } = await supabase.from('notifications_log').update({ status: 'sent', sent_at: new Date().toISOString() }).eq('id', id);
+      if (e2 && !isUndefinedColumnError(e2, 'status')) throw e2;
+      return;
+    }
     if (error) throw error;
   },
 
-  // Release a 'sending' claim whose SMTP attempt failed, so the next tick can
-  // retry while the send window is still open. Only ever deletes 'sending' rows
-  // — a sent or skipped row must stay to keep dedup honest.
-  async deleteNotificationLog(id) {
-    const { error } = await supabase
-      .from('notifications_log')
-      .delete()
-      .eq('id', id)
-      .eq('status', 'sending');
-    if (error && isUndefinedColumnError(error, 'status')) {
-      const retry = await supabase.from('notifications_log').delete().eq('id', id);
-      if (retry.error) throw retry.error;
+  // SMTP attempt failed: keep the row (never delete) and mark it 'failed' with
+  // the provider error so the next tick can retry inside the window and ops can
+  // see why. claimed_at is refreshed so the abandon timer restarts.
+  async markNotificationLogFailed(id, message) {
+    const patch = { status: 'failed', claimed_at: new Date().toISOString(), error: String(message || 'smtp-error').slice(0, 500) };
+    let { error } = await supabase.from('notifications_log').update(patch).eq('id', id);
+    if (error && isUndefinedColumnError(error, 'error')) {
+      const { error: e2 } = await supabase.from('notifications_log').update({ status: 'failed', claimed_at: new Date().toISOString() }).eq('id', id);
+      if (e2 && isUndefinedColumnError(e2, 'claimed_at')) {
+        await supabase.from('notifications_log').update({ status: 'failed' }).eq('id', id);
+      } else if (e2) throw e2;
       return;
     }
+    if (error && isUndefinedColumnError(error, 'claimed_at')) {
+      const { error: e2 } = await supabase.from('notifications_log').update({ status: 'failed', error: patch.error }).eq('id', id);
+      if (e2 && isUndefinedColumnError(e2, 'status')) return;
+      if (e2) throw e2;
+      return;
+    }
+    if (error) throw error;
+  },
+
+  // Legacy helper retained for the smoke script / manual cleanup; the scheduler
+  // no longer deletes claims (it marks them 'failed' instead).
+  async deleteNotificationLog(id) {
+    const { error } = await supabase.from('notifications_log').delete().eq('id', id);
     if (error) throw error;
   },
 
@@ -440,14 +543,24 @@ const db = {
     const { error } = await supabase
       .from('cron_heartbeat')
       .upsert(entry, { onConflict: 'id' });
-    if (error && /cron_heartbeat|does not exist|relation/i.test(`${error.code || ''} ${error.message || ''}`)) {
+    if (!error) return;
+    // A brand-new count column (emails_superseded / emails_failed / user_error,
+    // migration 0008) not applied yet? Strip exactly the offending column and
+    // retry so the core heartbeat (last_started_at / emails_sent) still lands.
+    const stripCandidates = ['emails_superseded', 'emails_failed', 'user_errors'];
+    if (stripCandidates.some((c) => isUndefinedColumnError(error, c))) {
+      const offending = stripCandidates.find((c) => isUndefinedColumnError(error, c));
+      const { [offending]: _drop, ...rest } = entry;
+      return this.upsertCronHeartbeat(rest);
+    }
+    if (/cron_heartbeat|does not exist|relation/i.test(`${error.code || ''} ${error.message || ''}`)) {
       if (!db._hbWarned) {
         db._hbWarned = true;
         console.warn('[db] cron_heartbeat table missing — apply migration 0007. Heartbeat writes will be no-ops.');
       }
       return;
     }
-    if (error) throw error;
+    throw error;
   },
 
   async getCronHeartbeat() {

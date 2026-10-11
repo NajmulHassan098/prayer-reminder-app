@@ -5,6 +5,10 @@ const { getOrFetchTodayTimes, getOrFetchTimesForDate, localDateStrFor, todayStr,
 const { REMINDERS, reminderOfTheDay } = require("../data/reminders");
 const { hadithOfTheDay } = require("../data/hadiths");
 const { doneCountsByDate, currentStreak, bestStreakInMonth, monthSummary } = require("../utils/streaks");
+// Reuse the scheduler's own prefs reader so the /times reminder panel shows the
+// EXACT lead/delay minutes the emails will use (same clamp + defaults), not a
+// re-derived guess. Read-only here; the sending still happens server-side.
+const { notifPrefsOf } = require("../services/scheduler");
 
 const router = express.Router();
 const PRAYERS = ["Fajr", "Dhuhr", "Asr", "Maghrib", "Isha"];
@@ -247,7 +251,44 @@ router.get("/times", requireLogin, async (req, res) => {
   const statusMap = {};
   responses.filter((r) => r.date === date && PRAYERS.includes(r.prayer_name)).forEach((r) => (statusMap[r.prayer_name] = r.status));
 
-  res.render("times", { user, todayTimes, nextPrayer, tahajjud, apiError, statusMap, today: date, PRAYERS, hadith: hadithOfTheDay(), isAdmin: false });
+  // Build the reminder schedule for the NEXT prayer from the same prefs the
+  // server scheduler uses, so this panel mirrors reality: a pre-reminder at
+  // (prayer - preMinutes) and a "Did you pray?" follow-up at (prayer +
+  // postMinutes). It only DISPLAYS the plan; it never sends anything itself.
+  let reminder = null;
+  if (nextPrayer && nextPrayer.atUTC) {
+    const prefs = notifPrefsOf(user);
+    const atMs = new Date(nextPrayer.atUTC).getTime();
+    const onForPrayer = prefs.enabled(nextPrayer.name);
+    reminder = {
+      name: nextPrayer.name,
+      preMinutes: prefs.preMinutes,
+      postMinutes: prefs.postMinutes,
+      preEnabled: onForPrayer && prefs.pre,
+      postEnabled: onForPrayer && prefs.post,
+      preAtUTC: new Date(atMs - prefs.preMinutes * 60000).toISOString(),
+      postAtUTC: new Date(atMs + prefs.postMinutes * 60000).toISOString(),
+    };
+  }
+
+  res.render("times", { user, todayTimes, nextPrayer, tahajjud, apiError, statusMap, today: date, PRAYERS, hadith: hadithOfTheDay(), reminder, isAdmin: false });
+});
+
+// JSON feed for the nav's "next prayer" chip. Reuses computeNextPrayer so the
+// chip always counts down to the same target the /times ring is animating.
+// We return an ISO instant rather than a formatted string — the browser ticks
+// the countdown locally, so this endpoint is hit once per page load (no
+// per-second traffic).
+router.get("/api/next-prayer", requireLogin, async (req, res) => {
+  try {
+    const n = await computeNextPrayer(req.user);
+    if (!n) return res.json({ next: null });
+    res.json({ next: { name: n.name, at: n.atUTC.toISOString(), isTomorrow: !!n.isTomorrow } });
+  } catch (err) {
+    // Any hiccup (offline Aladhan, missing city) degrades to a hidden chip
+    // rather than an error toast — the app has bigger fish to fry.
+    res.status(200).json({ next: null });
+  }
 });
 
 // Eid al-Fitr celebration — only meaningful on 1 Shawwal. We gate it on the

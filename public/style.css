@@ -443,3 +443,609 @@ html[data-theme="light"] .footer-bottom { border-top-color: #e2e8f0; }
 html[data-theme="light"] .footer-bottom .sep { color: #cbd5e1; }
 .footer-bottom a { color: inherit; text-decoration: none; }
 .footer-bottom a:hover { text-decoration: underline; }
+
+/* ==========================================================================
+   NAVIGATION — design tokens
+   Every visual attribute the top bar / tab bar / sheet use reads from these
+   variables so light-mode, RTL and future retheming are a token swap, not a
+   utility-class override. Names describe ROLE (accent, muted, pill-bg), not
+   color, so a palette change touches this block only.
+   ========================================================================== */
+:root {
+  --nav-h: 64px;
+  --nav-h-mobile: 56px;
+  --nav-tab-h: 60px;
+  --nav-space-1: 4px;
+  --nav-space-2: 8px;
+  --nav-space-3: 12px;
+  --nav-space-4: 16px;
+  --nav-space-6: 24px;
+  --nav-fs-xs: 11px;
+  --nav-fs-sm: 12.5px;
+  --nav-fs-md: 14px;
+  --nav-fs-lg: 16px;
+  --nav-radius-pill: 9999px;
+  --nav-radius-card: 14px;
+  --nav-radius-mark: 12px;
+
+  --nav-bg: rgba(2, 6, 23, 0.72);
+  --nav-bg-scroll: rgba(2, 6, 23, 0.88);
+  --nav-fg: #cbd5e1;
+  --nav-fg-strong: #f8fafc;
+  --nav-muted: #94a3b8;
+  --nav-border: rgba(30, 41, 59, 0.85);
+  --nav-border-strong: rgba(51, 65, 85, 0.9);
+  --nav-accent: #34d399;
+  --nav-accent-strong: #10b981;
+  --nav-accent-fg: #052e1a;
+  --nav-accent-soft: rgba(52, 211, 153, 0.10);
+  --nav-accent-ring: rgba(52, 211, 153, 0.35);
+  --nav-pill-bg: rgba(148, 163, 184, 0.08);
+  --nav-pill-bg-hover: rgba(148, 163, 184, 0.16);
+  --nav-warn: #fbbf24;
+  --nav-danger: #f87171;
+  --nav-blur: saturate(140%) blur(14px);
+  --nav-shadow-idle: 0 1px 0 rgba(0, 0, 0, 0.0);
+  --nav-shadow-scrolled: 0 1px 0 rgba(15, 23, 42, 0.5), 0 8px 24px -18px rgba(0, 0, 0, 0.9);
+  --nav-ease: cubic-bezier(.2, .7, .2, 1);
+  --nav-focus: 0 0 0 2px var(--nav-bg), 0 0 0 4px var(--nav-accent);
+}
+html[data-theme="light"] {
+  --nav-bg: rgba(248, 250, 252, 0.78);
+  --nav-bg-scroll: rgba(255, 255, 255, 0.9);
+  --nav-fg: #334155;
+  --nav-fg-strong: #0f172a;
+  --nav-muted: #475569;
+  --nav-border: rgba(226, 232, 240, 0.9);
+  --nav-border-strong: rgba(203, 213, 225, 0.9);
+  --nav-accent: #059669;
+  --nav-accent-strong: #047857;
+  --nav-accent-fg: #ecfdf5;
+  --nav-accent-soft: rgba(5, 150, 105, 0.10);
+  --nav-accent-ring: rgba(5, 150, 105, 0.35);
+  --nav-pill-bg: rgba(15, 23, 42, 0.05);
+  --nav-pill-bg-hover: rgba(15, 23, 42, 0.09);
+  --nav-warn: #b45309;
+  --nav-danger: #b91c1c;
+  --nav-shadow-idle: 0 1px 0 rgba(15, 23, 42, 0.04);
+  --nav-shadow-scrolled: 0 1px 0 rgba(15, 23, 42, 0.06), 0 8px 24px -18px rgba(15, 23, 42, 0.25);
+}
+
+/* ---------- Header shell ---------------------------------------------------
+   Fixed so existing views keep their pt-24 top padding unchanged. Blur +
+   subtle border; data-scrolled drives a slightly darker background and a
+   soft shadow once the user scrolls. */
+.topnav {
+  position: fixed;
+  inset-inline: 0;
+  top: 0;
+  z-index: 60;
+  height: var(--nav-h);
+  background: var(--nav-bg);
+  -webkit-backdrop-filter: var(--nav-blur);
+  backdrop-filter: var(--nav-blur);
+  border-bottom: 1px solid var(--nav-border);
+  box-shadow: var(--nav-shadow-idle);
+  color: var(--nav-fg);
+  transition: background-color .22s var(--nav-ease), box-shadow .22s var(--nav-ease), border-color .22s var(--nav-ease);
+}
+.topnav[data-scrolled="true"] {
+  background: var(--nav-bg-scroll);
+  box-shadow: var(--nav-shadow-scrolled);
+  border-bottom-color: var(--nav-border-strong);
+}
+.topnav-inner {
+  max-width: 1280px;
+  height: 100%;
+  margin-inline: auto;
+  padding-inline: var(--nav-space-4);
+  display: flex;
+  align-items: center;
+  gap: var(--nav-space-3);
+}
+@media (min-width: 640px) { .topnav-inner { padding-inline: var(--nav-space-6); } }
+
+/* ---------- Brand ----------------------------------------------------------
+   Never wraps: title is nowrap+ellipsis on narrow widths; the Hijri sub-line
+   becomes visible only at 480px+ where there's room for it. Icon mark keeps
+   the brand readable when the text is truncated. */
+.nav-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex-shrink: 0;
+  text-decoration: none;
+  color: var(--nav-fg-strong);
+}
+.nav-brand-mark {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--nav-radius-mark);
+  background: linear-gradient(135deg, var(--nav-accent) 0%, var(--nav-accent-strong) 100%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #052e1a;
+  box-shadow: 0 6px 20px -10px rgba(16, 185, 129, 0.55);
+  flex-shrink: 0;
+}
+html[data-theme="light"] .nav-brand-mark { color: #ecfdf5; }
+.nav-brand-mark .nav-ic { width: 22px; height: 22px; }
+.nav-brand-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.15;
+}
+.nav-brand-title {
+  font-size: var(--nav-fs-lg);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--nav-fg-strong);
+  white-space: nowrap;
+}
+.nav-brand:hover .nav-brand-title { color: var(--nav-accent); }
+.nav-brand-sub {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--nav-fs-xs);
+  color: var(--nav-accent);
+  margin-top: 2px;
+  max-width: 200px;
+  min-width: 0;
+}
+.nav-brand-sub-ic { display: inline-flex; color: var(--nav-accent); }
+.nav-brand-sub-ic .nav-ic { width: 12px; height: 12px; stroke-width: 2; }
+.nav-brand-sub-txt {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+@media (max-width: 479px) {
+  .nav-brand-sub { display: none; }
+}
+@media (max-width: 379px) {
+  .nav-brand-title { display: none; }
+}
+
+/* ---------- Primary links --------------------------------------------------
+   Six slots max. Icon-only by default; text labels appear at 1200+ where
+   there's real space for them. Active state uses a pill background + a tiny
+   accent underline so it reads clearly without shouting. */
+.nav-primary {
+  display: none;
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: center;
+}
+.nav-primary-list {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.nav-link {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding-inline: 10px;
+  border-radius: var(--nav-radius-pill);
+  color: var(--nav-fg);
+  text-decoration: none;
+  font-size: var(--nav-fs-md);
+  font-weight: 500;
+  white-space: nowrap;
+  transition: color .15s var(--nav-ease), background-color .15s var(--nav-ease);
+}
+.nav-link .nav-ic { width: 20px; height: 20px; flex-shrink: 0; }
+.nav-link-label { display: none; }
+.nav-link:hover { color: var(--nav-fg-strong); background: var(--nav-pill-bg-hover); }
+.nav-link.is-current {
+  color: var(--nav-fg-strong);
+  background: var(--nav-accent-soft);
+}
+.nav-link.is-current .nav-ic { color: var(--nav-accent); }
+.nav-link.is-current::after {
+  content: "";
+  position: absolute;
+  inset-inline: 12px;
+  bottom: 3px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--nav-accent);
+  opacity: .9;
+}
+@media (min-width: 1200px) {
+  .nav-link { padding-inline: 12px; }
+  .nav-link-label { display: inline; }
+}
+@media (min-width: 768px) {
+  .nav-primary { display: flex; }
+}
+
+/* ---------- Utilities strip ------------------------------------------------
+   Right-aligned group: chip + search + more + theme + avatar + burger.
+   Uses margin-inline-start:auto so it works in RTL without flipping order. */
+.nav-utils {
+  display: flex;
+  align-items: center;
+  gap: var(--nav-space-1);
+  margin-inline-start: auto;
+  flex-shrink: 0;
+}
+
+.nav-icon-btn {
+  width: 38px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--nav-radius-pill);
+  border: none;
+  background: transparent;
+  color: var(--nav-fg);
+  cursor: pointer;
+  transition: background-color .15s var(--nav-ease), color .15s var(--nav-ease);
+}
+.nav-icon-btn:hover { background: var(--nav-pill-bg-hover); color: var(--nav-fg-strong); }
+.nav-icon-btn .nav-ic { width: 20px; height: 20px; }
+
+/* ---------- Next-prayer chip ----------------------------------------------
+   Small pill in the utilities area. Hidden until JS confirms a target; once
+   shown it stays on one line and truncates the time gracefully at 375px. */
+.nav-chip {
+  display: none;                /* hidden below 1200 for calm mobile/tablet */
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding-inline: 12px;
+  border-radius: var(--nav-radius-pill);
+  background: var(--nav-pill-bg);
+  border: 1px solid var(--nav-border);
+  color: var(--nav-fg);
+  text-decoration: none;
+  font-size: var(--nav-fs-sm);
+  white-space: nowrap;
+  transition: background-color .15s var(--nav-ease), border-color .15s var(--nav-ease), color .15s var(--nav-ease);
+}
+.nav-chip[hidden] { display: none; }
+@media (min-width: 1200px) { .nav-chip:not([hidden]) { display: inline-flex; } }
+.nav-chip:hover { background: var(--nav-pill-bg-hover); border-color: var(--nav-border-strong); color: var(--nav-fg-strong); }
+.nav-chip-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--nav-warn);
+  box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.15);
+  flex-shrink: 0;
+}
+.nav-chip-body { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; }
+.nav-chip-name { color: var(--nav-fg-strong); font-weight: 600; }
+.nav-chip-time { color: var(--nav-muted); font-variant-numeric: tabular-nums; }
+
+/* ---------- Member search (expand-on-click) --------------------------------
+   Icon-only by default; click toggles [data-open="true"] which reveals the
+   field pill inline. Field keeps the legacy .member-search class so the
+   dashboard's live-filter wiring keeps working unchanged. */
+.nav-search { display: inline-flex; align-items: center; }
+.nav-search-field {
+  display: inline-flex;
+  align-items: center;
+  height: 38px;
+  width: 0;
+  opacity: 0;
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--nav-radius-pill);
+  background: var(--nav-pill-bg);
+  transition: width .22s var(--nav-ease), opacity .18s var(--nav-ease), padding .22s var(--nav-ease), border-color .18s var(--nav-ease), background-color .18s var(--nav-ease);
+}
+.nav-search[data-open="true"] .nav-search-field {
+  width: 220px;
+  opacity: 1;
+  padding-inline: 12px;
+  border-color: var(--nav-border-strong);
+  background: var(--nav-bg-scroll);
+}
+.nav-search-field input {
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--nav-fg-strong);
+  font-size: var(--nav-fs-md);
+  width: 100%;
+  padding: 0;
+}
+.nav-search-field input::placeholder { color: var(--nav-muted); }
+.nav-search-toggle[aria-expanded="true"] { background: var(--nav-accent-soft); color: var(--nav-accent); }
+
+/* ---------- Popovers (More, Profile) --------------------------------------
+   Absolutely positioned under their wrap. role=menu; items are anchors or
+   buttons with role=menuitem for screen readers. */
+.nav-pop-wrap { position: relative; display: inline-flex; }
+.nav-pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  inset-inline-end: 0;
+  min-width: 232px;
+  padding: 6px;
+  background: var(--nav-bg-scroll);
+  -webkit-backdrop-filter: var(--nav-blur);
+  backdrop-filter: var(--nav-blur);
+  border: 1px solid var(--nav-border-strong);
+  border-radius: var(--nav-radius-card);
+  box-shadow: 0 20px 40px -20px rgba(0, 0, 0, 0.6);
+  z-index: 70;
+}
+html[data-theme="light"] .nav-pop { box-shadow: 0 20px 40px -20px rgba(15, 23, 42, 0.25); }
+.nav-pop-heading {
+  margin: 6px 10px 8px;
+  font-size: var(--nav-fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+  color: var(--nav-muted);
+}
+.nav-pop-heading strong { color: var(--nav-fg-strong); font-weight: 600; }
+.nav-pop-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 10px;
+  border-radius: 10px;
+  border: none;
+  background: transparent;
+  color: var(--nav-fg);
+  font-size: var(--nav-fs-md);
+  font-weight: 500;
+  text-decoration: none;
+  text-align: start;
+  cursor: pointer;
+  transition: background-color .12s var(--nav-ease), color .12s var(--nav-ease);
+}
+.nav-pop-item:hover { background: var(--nav-pill-bg-hover); color: var(--nav-fg-strong); }
+.nav-pop-item.is-current { color: var(--nav-accent); background: var(--nav-accent-soft); }
+.nav-pop-item .nav-ic { width: 18px; height: 18px; flex-shrink: 0; color: var(--nav-muted); }
+.nav-pop-item.is-current .nav-ic, .nav-pop-item:hover .nav-ic { color: currentColor; }
+.nav-pop-sep { border: none; border-top: 1px solid var(--nav-border); margin: 6px 4px; }
+.nav-pop-form { margin: 0; }
+.nav-pop-danger { color: var(--nav-danger); }
+.nav-pop-danger:hover { color: var(--nav-danger); background: rgba(248, 113, 113, 0.08); }
+.nav-pop-danger .nav-ic { color: var(--nav-danger); }
+
+/* ---------- Theme toggle + avatar ----------------------------------------- */
+.nav-theme-btn .nav-theme-ic { display: inline-flex; }
+.nav-theme-btn .nav-theme-ic .nav-ic { width: 20px; height: 20px; }
+.nav-theme-btn .theme-icon-moon { display: none; }
+html[data-theme="light"] .nav-theme-btn .theme-icon-moon { display: inline-flex; }
+html[data-theme="light"] .nav-theme-btn .theme-icon-sun { display: none; }
+
+.nav-avatar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px 3px 3px;
+  border-radius: var(--nav-radius-pill);
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  color: var(--nav-fg);
+  transition: background-color .15s var(--nav-ease), border-color .15s var(--nav-ease);
+}
+.nav-avatar-btn:hover { background: var(--nav-pill-bg-hover); border-color: var(--nav-border); }
+.nav-avatar-btn[aria-expanded="true"] { background: var(--nav-accent-soft); border-color: var(--nav-accent-ring); }
+.nav-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, var(--nav-accent), #14b8a6);
+  color: #052e1a;
+  font-weight: 700;
+  font-size: 13px;
+  box-shadow: 0 6px 16px -10px rgba(16, 185, 129, 0.6);
+}
+html[data-theme="light"] .nav-avatar { color: #ecfdf5; }
+.nav-avatar-chev { display: none; }
+.nav-avatar-chev .nav-ic { width: 14px; height: 14px; color: var(--nav-muted); }
+@media (min-width: 640px) { .nav-avatar-chev { display: inline-flex; } }
+
+/* ---------- Burger (mobile only) ------------------------------------------ */
+.nav-burger { display: inline-flex; }
+@media (min-width: 768px) { .nav-burger { display: none; } }
+
+/* ---------- Mobile bottom tab bar -----------------------------------------
+   Shown only below 768. Uses safe-area-inset for notched phones. The body
+   picks up padding-bottom so content never hides behind the bar. */
+.tabbar {
+  display: block;
+  position: fixed;
+  inset-inline: 0;
+  bottom: 0;
+  z-index: 60;
+  background: var(--nav-bg-scroll);
+  -webkit-backdrop-filter: var(--nav-blur);
+  backdrop-filter: var(--nav-blur);
+  border-top: 1px solid var(--nav-border);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+@media (min-width: 768px) { .tabbar { display: none; } }
+@media (min-width: 768px) { body { padding-bottom: 0 !important; } }
+@media (max-width: 767px) { body { padding-bottom: calc(var(--nav-tab-h) + env(safe-area-inset-bottom, 0px) + 8px); } }
+
+.tabbar-list {
+  list-style: none;
+  margin: 0 auto;
+  padding: 0;
+  max-width: 100%;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  align-items: stretch;
+  height: var(--nav-tab-h);
+}
+.tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  height: 100%;
+  border: none;
+  background: transparent;
+  color: var(--nav-muted);
+  text-decoration: none;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 0;
+  transition: color .15s var(--nav-ease);
+}
+.tab .nav-ic { width: 22px; height: 22px; }
+.tab-label { line-height: 1; }
+.tab:hover { color: var(--nav-fg-strong); }
+.tab.is-current { color: var(--nav-accent); }
+.tab.is-current::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  width: 26px;
+  height: 2px;
+  border-radius: 0 0 2px 2px;
+  background: var(--nav-accent);
+}
+.tab { position: relative; }
+
+/* ---------- Full-height sheet (mobile More) -------------------------------
+   Slides up; backdrop fades. Body gets .nav-sheet-lock to prevent scroll. */
+.nav-sheet-wrap {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: block;
+}
+.nav-sheet-wrap[hidden] { display: none; }
+.nav-sheet-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.5);
+  opacity: 0;
+  transition: opacity .22s var(--nav-ease);
+}
+html[data-theme="light"] .nav-sheet-backdrop { background: rgba(15, 23, 42, 0.35); }
+.nav-sheet-wrap[data-open="true"] .nav-sheet-backdrop { opacity: 1; }
+.nav-sheet {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  max-height: min(70vh, 520px);
+  overflow-y: auto;
+  background: var(--nav-bg-scroll);
+  -webkit-backdrop-filter: var(--nav-blur);
+  backdrop-filter: var(--nav-blur);
+  border-top: 1px solid var(--nav-border-strong);
+  border-radius: 20px 20px 0 0;
+  transform: translateY(100%);
+  transition: transform .26s var(--nav-ease);
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+  color: var(--nav-fg);
+}
+.nav-sheet-wrap[data-open="true"] .nav-sheet { transform: translateY(0); }
+.nav-sheet-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px 4px;
+  position: sticky;
+  top: 0;
+  background: var(--nav-bg-scroll);
+}
+.nav-sheet-title { font-size: var(--nav-fs-lg); font-weight: 700; color: var(--nav-fg-strong); }
+.nav-sheet-body { padding: 4px 8px 8px; }
+.nav-sheet-heading {
+  margin: 12px 8px 6px;
+  font-size: var(--nav-fs-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  color: var(--nav-muted);
+}
+.nav-sheet-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.nav-sheet-form { margin: 0; }
+.nav-sheet-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: none;
+  background: transparent;
+  color: var(--nav-fg);
+  text-decoration: none;
+  font-size: var(--nav-fs-md);
+  font-weight: 500;
+  text-align: start;
+  cursor: pointer;
+  transition: background-color .12s var(--nav-ease), color .12s var(--nav-ease);
+}
+.nav-sheet-item:hover { background: var(--nav-pill-bg-hover); color: var(--nav-fg-strong); }
+.nav-sheet-item.is-current { color: var(--nav-accent); background: var(--nav-accent-soft); }
+.nav-sheet-item .nav-ic { width: 20px; height: 20px; flex-shrink: 0; color: var(--nav-muted); }
+.nav-sheet-item.is-current .nav-ic, .nav-sheet-item:hover .nav-ic { color: currentColor; }
+.nav-sheet-btn { font-family: inherit; }
+.nav-sheet .nav-pop-danger, .nav-sheet .nav-pop-danger .nav-ic { color: var(--nav-danger); }
+.nav-sheet .nav-pop-danger:hover { background: rgba(248, 113, 113, 0.08); color: var(--nav-danger); }
+.nav-sheet .theme-icon-moon { display: none; }
+html[data-theme="light"] .nav-sheet .theme-icon-moon { display: inline-flex; }
+html[data-theme="light"] .nav-sheet .theme-icon-sun { display: none; }
+body.nav-sheet-lock { overflow: hidden; }
+
+/* ---------- Focus rings ----------------------------------------------------
+   :focus-visible only — so mouse clicks stay visually quiet, keyboard users
+   get a clear 2px accent ring. Applied to every interactive element in the
+   nav; scoped with :where() to keep specificity low (any future override
+   wins without !important). */
+.topnav :where(a, button):focus-visible,
+.tabbar :where(a, button):focus-visible,
+.nav-sheet :where(a, button):focus-visible,
+.nav-pop :where(a, button):focus-visible {
+  outline: none;
+  box-shadow: var(--nav-focus);
+  border-radius: 10px;
+}
+.nav-avatar-btn:focus-visible { box-shadow: 0 0 0 2px var(--nav-bg), 0 0 0 4px var(--nav-accent); }
+
+/* ---------- Reduced motion -----------------------------------------------
+   Suppress every transition/animation this nav adds. Countdown text still
+   updates; popovers still open — they just snap instead of sliding. */
+@media (prefers-reduced-motion: reduce) {
+  .topnav, .topnav *,
+  .tabbar, .tabbar *,
+  .nav-sheet-wrap, .nav-sheet-wrap * {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+/* ---------- RTL ------------------------------------------------------------
+   The layout uses flex + logical properties throughout, so direction: rtl
+   (already set on <html> by the auth middleware for ur/ar locales) flips
+   the whole bar without extra rules. Only the active underline needs an
+   explicit inset-inline anchor so it stays centered on the pill, and the
+   sheet close button mirrors automatically because it lives in a flex
+   row with justify-content:space-between. */
+[dir="rtl"] .nav-link.is-current::after,
+[dir="rtl"] .tab.is-current::before { inset-inline: 12px; }
+[dir="rtl"] .tab.is-current::before { inset-inline: calc(50% - 13px); }
+
+

@@ -36,7 +36,13 @@ function getTransporter() {
     pool: true,
     maxConnections: 5,
     maxMessages: 100,
-    connectionTimeout: 60000,
+    // Bounded timeouts so a hung SMTP relay can never push a serverless tick
+    // past the platform function limit — a stuck send must fail fast, get
+    // marked 'failed', and be retried on the next tick inside the window.
+    connectionTimeout: Number(process.env.SMTP_CONNECTION_TIMEOUT || 15000),
+    greetingTimeout: Number(process.env.SMTP_GREETING_TIMEOUT || 15000),
+    socketTimeout: Number(process.env.SMTP_SOCKET_TIMEOUT || 30000),
+    sendingTimeout: Number(process.env.SMTP_SENDING_TIMEOUT || 30000),
   });
   
   return transporter;
@@ -106,6 +112,22 @@ function stripHtml(html) {
     .trim();
 }
 
+// Render a calendar day ("YYYY-MM-DD", the user's local date from the plan row)
+// in the email's own locale: "11 Oct 2026" for English, Urdu numerals/month
+// names for ur, etc. Falls back to the raw string if it can't be parsed.
+function formatEmailDate(dateStr, loc) {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  if (isNaN(d)) return dateStr;
+  const intlLoc = loc === "ur" ? "ur-PK" : loc === "ar" ? "ar" : loc === "id" ? "id-ID" : loc === "tr" ? "tr" : "en-GB";
+  return d.toLocaleDateString(intlLoc, { day: "numeric", month: "short", year: "numeric" });
+}
+
+// Today's date in the same style, anchored to the user's calendar day string
+// when available (the footer of reminder emails has no plan row yet).
+function todayLabel(loc) {
+  return formatEmailDate(new Date().toISOString().slice(0, 10), loc);
+}
+
 function reminderEmailHtml(user, prayerName, time, leadMinutes = 30) {
   const loc = emailLocale(user);
   const dir = dirAttr(loc);
@@ -149,7 +171,7 @@ function reminderEmailHtml(user, prayerName, time, leadMinutes = 30) {
         <!-- Footer -->
         <div style="background-color: #f1f5f9; padding: 24px; text-align: center; border-top: 1px solid #e2e8f0;">
           <p style="color: #64748b; font-size: 12px; margin: 0;">
-            ${t(loc, "email.brand")} · ${new Date().toLocaleDateString()} — ${t(loc, "email.footer_sent_with")}
+            ${t(loc, "email.brand")} · ${todayLabel(loc)} — ${t(loc, "email.footer_sent_with")}
           </p>
         </div>
       </div>
@@ -185,7 +207,7 @@ function followupEmailHtml(user, prayerName, date, yesUrl, noUrl, postMinutes = 
           </p>
           
           <p style="color: #64748b; font-size: 15px; line-height: 1.6; margin: 0 0 24px;">
-            ${t(loc, "email.followup_nudge")} <strong>${date}</strong>.
+            ${t(loc, "email.followup_nudge")} <strong>${formatEmailDate(date, loc)}</strong>.
           </p>
 
           <p style="color: #64748b; font-size: 15px; line-height: 1.6; margin: 0 0 24px;">
@@ -213,7 +235,7 @@ function followupEmailHtml(user, prayerName, date, yesUrl, noUrl, postMinutes = 
         <!-- Footer -->
         <div style="background-color: #f1f5f9; padding: 24px; text-align: center; border-top: 1px solid #e2e8f0;">
           <p style="color: #64748b; font-size: 12px; margin: 0;">
-            ${t(loc, "email.brand")} · ${new Date().toLocaleDateString()} — ${t(loc, "email.footer_sent_with")}
+            ${t(loc, "email.brand")} · ${todayLabel(loc)} — ${t(loc, "email.footer_sent_with")}
           </p>
         </div>
       </div>
@@ -424,7 +446,7 @@ function seasonalEmailHtml({ emoji, title, greeting, lines, dir = "ltr", loc = "
         </div>
         <div style="background-color: #f1f5f9; padding: 24px; text-align: center; border-top: 1px solid #e2e8f0;">
           <p style="color: #64748b; font-size: 12px; margin: 0;">
-            ${t(loc, "email.brand")} · ${new Date().toLocaleDateString()} — ${t(loc, "email.footer_sent_with")}
+            ${t(loc, "email.brand")} · ${todayLabel(loc)} — ${t(loc, "email.footer_sent_with")}
           </p>
         </div>
       </div>
@@ -505,5 +527,6 @@ module.exports = {
   suhoorEmailHtml,
   iftarEmailHtml,
   taraweehEmailHtml,
-  adhkarFooter
+  adhkarFooter,
+  formatEmailDate
 };

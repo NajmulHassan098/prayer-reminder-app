@@ -7,6 +7,9 @@
 // Usage:
 //   SMOKE_TEST_EMAIL=you@example.com npm run smoke-reminder
 //   SMOKE_TEST_EMAIL=... PRAYER=Asr npm run smoke-reminder   (default: Asr)
+//   SMOKE_TEST_EMAIL=... SMOKE_TEST_LANG=en npm run smoke-reminder
+//     (forces the email language; default is auto-detect from country,
+//      exactly like the scheduler does for a real user)
 //
 // Requires the same SMTP_* and EMAIL_FROM env vars as the app. If SMOKE_TEST_EMAIL
 // is not set, the script refuses to run rather than guess a recipient.
@@ -31,6 +34,8 @@ const fakeUser = {
   name: "Smoke-test recipient",
   city: process.env.SMOKE_TEST_CITY || "Karachi",
   country: process.env.SMOKE_TEST_COUNTRY || "Pakistan",
+  // Explicit choice wins in resolveLocale; unset keeps country auto-detect.
+  locale: process.env.SMOKE_TEST_LANG || null,
   notification_prefs: null,
 };
 

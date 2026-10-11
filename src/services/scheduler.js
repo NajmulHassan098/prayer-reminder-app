@@ -28,11 +28,15 @@ const MISSED_AFTER_MIN = Number(process.env.MISSED_AFTER_MINUTES || 120);
 // a late tick (restart, downtime, SMTP failure) must not cause catch-up or
 // duplicate emails stacking on top of the next prayer's reminders.
 //
-// Default widened from 10 to 15 to cover one missed 5-minute trigger without
-// letting a stale reminder stack into the next prayer's window — the
-// NEXT_PRAYER_BUFFER_MIN clamp in buildDayPlan is the actual anti-stacking
-// safeguard, and it caps every reminder/followup at (next prayer − 5 min).
-const SEND_GRACE_MIN = Number(process.env.SEND_GRACE_MINUTES || 15);
+// 10 minutes per product spec: with a reliable ~1-minute trigger, a reminder
+// that is more than 10 min late is no longer useful (the prayer is over or the
+// next one is starting) and is dropped rather than caught up.
+const SEND_GRACE_MIN = Number(process.env.SEND_GRACE_MINUTES || 10);
+// Minimum spacing between ANY two emails to the same user. Two adjacent
+// events closer than this (e.g. post(Asr) and pre(Maghrib) when the prayers are
+// ~60 min apart) are collapsed at plan time so the user never receives two
+// emails back-to-back; the loser is written as 'skipped_superseded'.
+const MIN_USER_GAP_MIN = Number(process.env.MIN_EMAIL_GAP_MINUTES || 10);
 // Hard per-tick cap on real emails. Protects SMTP rate limits on shared relays
 // and lets a large user-base catch up across multiple ticks instead of one.
 // Anything past the cap has its claim released so the next tick picks it up
@@ -232,70 +236,139 @@ function buildSpecialEvents(row, prefs) {
  * Pure decision function: for one user's day plan, decide the exact email
  * actions for THIS tick. No I/O — the tick executes whatever this returns.
  *
- * Rules (per email type, reminder/followup):
+ * Daily (five-prayer) rules — this is the anti-"two arrive together" core:
  *   - prefs must allow the prayer AND the type;
- *   - the (user, prayer, date, type) notification-log row, if any (sent OR
- *     skipped_stale), makes the event permanently handled → no action;
- *   - now < scheduledAt                      → not due yet, no action;
- *   - scheduledAt <= now < scheduledAt+grace → send candidate;
- *   - now >= scheduledAt+grace               → 'skipped_stale' (never sent).
- * Safeguard: at most ONE email per *group* per tick — 'daily' (the five
- * prayers' reminder/follow-up) and 'special' (opt-in Ayyam/Ramadan emails).
- * Normally the two groups are hours apart; in Ramadan that lets at most two
- * emails share one tick (e.g. Isha follow-up + Taraweeh) while each group
- * individually keeps the "newest wins, others skipped_stale" rule.
+ *   - a handled key (sent | skipped_stale | skipped_superseded |
+ *     skipped_already_logged | fresh 'sending') → no action. A 'failed' or
+ *     abandoned row is NOT passed in loggedSet, so it re-enters as retryable;
+ *   - MINIMUM-GAP collapse: two daily emails within MIN_USER_GAP (10 min) of
+ *     each other are resolved once, deterministically, at plan time — the
+ *     follow-up loses to a neighbouring pre-reminder, else the earlier loses.
+ *     The loser is 'skipped_superseded' (permanent), so post(N) never lands on
+ *     top of pre(N+1) no matter how ticks are timed.
+ *   - a kept event that is overdue → 'skipped_stale' (window-expired, or
+ *     prayer-time-passed when a pre-reminder's window would run past the
+ *     prayer itself — a pre is never sent after T);
+ *   - at most ONE daily email per tick: newest still-fresh due wins ('send'),
+ *     any other kept-due is 'skipped_superseded' (tick-cap).
+ * Seasonal (special) emails keep their own independent single-per-tick cap so
+ * this fix never changes Ramadan / Ayyam behaviour.
  *
- * @param plan      buildDayPlan() output (moment instants, user's tz-anchored)
- * @param nowIn     current time (Moment or UTC-parseable)
- * @param prefs     notifPrefsOf(user)
- * @param loggedSet Set of "Prayer|type" keys already in notifications_log
- * @param graceMin  send-window width in minutes (defaults to SEND_GRACE_MIN)
- * @param specials  buildSpecialEvents() output (optional)
- * @returns array of { prayer, type, scheduledAt, windowEndsAt, action, reason, group }
+ * @param loggedSet Set of "Prayer|type" keys already handled (see above)
+ * @returns array of { prayer, type, group, scheduledAt, windowEndsAt, action, reason, now }
  */
 function planTickActions(plan, nowIn, prefs, loggedSet, graceMin = SEND_GRACE_MIN, specials = []) {
   const now = moment.isMoment(nowIn) ? nowIn : moment(nowIn);
   const actions = [];
-  const due = [];
+  const isHandled = (prayer, type) => loggedSet && loggedSet.has(`${prayer}|${type}`);
 
-  const candidates = [];
+  // --- Daily (the five prayers) candidates --------------------------------
+  // precedence: a pre-reminder outranks a follow-up when the two collide, so
+  // post(N) is the one dropped in favour of pre(N+1) (product rule).
+  const daily = [];
   for (const ev of plan) {
-    candidates.push(
-      { prayer: ev.name, type: "reminder", scheduledAt: ev.preAt, allowed: prefs.pre && prefs.enabled(ev.name), group: "daily" },
-      { prayer: ev.name, type: "followup", scheduledAt: ev.postAt, allowed: prefs.post && prefs.enabled(ev.name), group: "daily" }
-    );
+    const allowed = (type) => (type === "reminder" ? prefs.pre : prefs.post) && prefs.enabled(ev.name);
+    if (allowed("reminder")) daily.push({ prayer: ev.name, type: "reminder", scheduledAt: ev.preAt, notAfter: ev.at, precedence: 2, group: "daily" });
+    if (allowed("followup")) daily.push({ prayer: ev.name, type: "followup", scheduledAt: ev.postAt, notAfter: null, precedence: 1, group: "daily" });
   }
-  for (const s of specials || []) {
-    candidates.push({ prayer: s.prayer, type: s.type, scheduledAt: s.at, allowed: true, group: "special" });
+  // Drop anything already handled (sent / skipped_* / in-flight) before the
+  // gap pass, so a retried 'failed' event (NOT in loggedSet) still participates.
+  const live = daily.filter((c) => !isHandled(c.prayer, c.type));
+
+  // --- Minimum-gap collapse (chronological) --------------------------------
+  // Sort ascending; walk and keep the more-relevant of any two emails that fall
+  // within MIN_USER_GAP of each other. The superseded one is a permanent
+  // 'skipped_superseded' — never resent, so a backstop/clustered tick can never
+  // emit two emails that were supposed to be spaced apart.
+  live.sort((a, b) => a.scheduledAt.valueOf() - b.scheduledAt.valueOf());
+  const kept = [];
+  for (const c of live) {
+    const prev = kept[kept.length - 1];
+    if (prev && c.scheduledAt.diff(prev.scheduledAt, "minutes") < MIN_USER_GAP_MIN) {
+      if (c.precedence >= prev.precedence) {
+        // current wins (equal → later is more current): supersede prev
+        actions.push({ ...prev, action: "skipped_superseded", reason: "gap-superseded", windowEndsAt: prev.scheduledAt.clone().add(graceMin, "minutes"), now });
+        kept[kept.length - 1] = c;
+      } else {
+        actions.push({ ...c, action: "skipped_superseded", reason: "gap-superseded", windowEndsAt: c.scheduledAt.clone().add(graceMin, "minutes"), now });
+      }
+      continue;
+    }
+    kept.push(c);
   }
 
-  for (const c of candidates) {
-    if (!c.allowed) continue;
-    if (loggedSet && loggedSet.has(`${c.prayer}|${c.type}`)) continue;
-    const windowEndsAt = c.scheduledAt.clone().add(graceMin, "minutes");
+  // --- Window classification for the kept daily events --------------------
+  const due = [];
+  for (const c of kept) {
+    // A pre-reminder is only useful up to the prayer time itself: the window is
+    // capped at T so it can never go out after the prayer has begun.
+    const graceEnd = c.scheduledAt.clone().add(graceMin, "minutes");
+    const windowEndsAt = c.notAfter && c.notAfter.isBefore(graceEnd) ? c.notAfter : graceEnd;
     if (now.isBefore(c.scheduledAt)) continue; // not due yet
     if (now.isBefore(windowEndsAt)) {
       due.push({ ...c, windowEndsAt });
+    } else if (c.notAfter && !now.isBefore(c.notAfter)) {
+      actions.push({ ...c, action: "skipped_stale", reason: "prayer-time-passed", windowEndsAt, now });
     } else {
-      actions.push({
-        prayer: c.prayer, type: c.type, group: c.group, action: "skipped_stale",
-        reason: "window-expired", scheduledAt: c.scheduledAt, windowEndsAt,
-      });
+      actions.push({ ...c, action: "skipped_stale", reason: "window-expired", windowEndsAt, now });
     }
   }
 
-  // Per-group cap: newest scheduledAt wins inside each group; older due
-  // emails are stale-by-policy and must not be retried on a later tick.
-  for (const group of ["daily", "special"]) {
-    const inGroup = due.filter((d) => d.group === group);
-    inGroup.sort((a, b) => b.scheduledAt.valueOf() - a.scheduledAt.valueOf());
-    inGroup.forEach((d, i) => {
-      if (i === 0) actions.push({ ...d, action: "send", reason: "" });
-      else actions.push({ ...d, action: "skipped_stale", reason: "tick-cap-older-due" });
-    });
-  }
+  // At most ONE daily email per tick: newest still-fresh due wins; the rest are
+  // superseded (never caught up on a later tick).
+  due.sort((a, b) => b.scheduledAt.valueOf() - a.scheduledAt.valueOf());
+  due.forEach((d, i) => {
+    if (i === 0) actions.push({ ...d, action: "send", reason: "", now });
+    else actions.push({ ...d, action: "skipped_superseded", reason: "tick-cap", now });
+  });
 
-  return actions.map((a) => ({ ...a, now }));
+  // --- Seasonal (opt-in) emails: unchanged, independent per-tick cap --------
+  // Ramadan / Ayyam are out of this fix's scope; they keep their own single
+  // email-per-tick group so the daily collapse above never suppresses them.
+  const sDue = [];
+  for (const s of specials || []) {
+    if (isHandled(s.prayer, s.type)) continue;
+    const c = { prayer: s.prayer, type: s.type, scheduledAt: s.at, group: "special", precedence: 1 };
+    const windowEndsAt = s.at.clone().add(graceMin, "minutes");
+    if (now.isBefore(s.at)) continue;
+    if (now.isBefore(windowEndsAt)) sDue.push({ ...c, windowEndsAt });
+    else actions.push({ ...c, action: "skipped_stale", reason: "window-expired", windowEndsAt, now });
+  }
+  sDue.sort((a, b) => b.scheduledAt.valueOf() - a.scheduledAt.valueOf());
+  sDue.forEach((d, i) => {
+    if (i === 0) actions.push({ ...d, action: "send", reason: "", now });
+    else actions.push({ ...d, action: "skipped_stale", reason: "tick-cap-older-due", now });
+  });
+
+  return actions;
+}
+
+/**
+ * Statuses that mean "this event is finished — never reconsider it". 'failed'
+ * and an in-flight 'sending'/'pending' are deliberately NOT here: a 'failed'
+ * row is retryable, and an abandoned claim (sending/pending older than 2 min)
+ * is treated as retryable too, so a crashed invocation cannot permanently stall
+ * an email. Everything else (a fresh in-flight claim or any terminal outcome)
+ * is handled for this tick.
+ */
+const TERMINAL_STATUSES = new Set(["sent", "skipped_stale", "skipped_superseded", "skipped_already_logged"]);
+const ABANDON_MIN = 2;
+
+// Convert a notifications_log status map (key -> {status, claimed_at}) into the
+// handled-set consumed by planTickActions. See TERMINAL_STATUSES for the rule.
+function handledSetFrom(statuses, now) {
+  const set = new Set();
+  for (const [key, row] of statuses) {
+    if (TERMINAL_STATUSES.has(row.status)) { set.add(key); continue; }
+    // A failed send is always retryable (the window check in planTickActions
+    // still stops it once the window closes), so leave it out of the set.
+    if (row.status === "failed") continue;
+    // pending / sending = in-flight unless abandoned (claimed > 2 min ago).
+    const claimed = row.claimed_at ? moment(row.claimed_at) : null;
+    const abandoned = claimed && now.diff(claimed, "minutes") >= ABANDON_MIN;
+    if (!abandoned) set.add(key); // fresh in-flight claim → handled this tick
+  }
+  return set;
 }
 
 /**
@@ -367,7 +440,7 @@ async function tick(nowOverride) {
 
   // Heartbeat counters persisted to cron_heartbeat in the finally block, no
   // matter how the tick exits (throw, rate-cap release, per-user error).
-  let usersSeen = 0, emailsSent = 0, emailsSkippedStale = 0, tickError = null;
+  let usersSeen = 0, emailsSent = 0, emailsSkippedStale = 0, emailsSuperseded = 0, emailsFailed = 0, userErrors = 0, tickError = null;
 
   try {
     // Get all users with city and country set from Supabase
@@ -411,9 +484,12 @@ async function tick(nowOverride) {
           logDayPlan(user, row, plan);
         }
 
-        // One query builds the handled-set: every (prayer, type) that already has
-        // a log row — sent or skipped_stale — is never touched again.
-        const loggedSet = await db.getNotificationLogKeys(user.id, date);
+        // Build the handled-set from the row STATUS, not mere existence: a
+        // 'failed' or abandoned ('sending' > 2 min old) row is left OUT so
+        // planTickActions can re-offer it for retry while the window is open;
+        // every other terminal status and a fresh in-flight claim stay handled.
+        const statuses = await db.getNotificationLogStatuses(user.id, date);
+        const loggedSet = handledSetFrom(statuses, now);
         const actions = planTickActions(plan, now, prefs, loggedSet, SEND_GRACE_MIN, specials);
 
         for (const a of actions) {
@@ -421,44 +497,46 @@ async function tick(nowOverride) {
             user_id: user.id, prayer_name: a.prayer, date,
             type: a.type, scheduled_at: a.scheduledAt.toISOString(),
           };
+          const decision = `user=${user.id} prayer=${a.prayer} type=${a.type} due_at=${a.scheduledAt.toISOString()} now=${now.toISOString()} decision=${a.action}${a.reason ? ` reason=${a.reason}` : ""}`;
 
-          // Expired or capped-out email: write a permanent 'skipped_stale' row so
-          // no later tick can reconsider it, then warn. NEVER send.
-          if (a.action === "skipped_stale") {
-            const claimed = await db.claimNotificationLog({ ...base, status: "skipped_stale" });
-            if (claimed) { emailsSkippedStale++; logSkip(user, a); }
+          // Expired or superseded email: write a permanent terminal row so no
+          // later tick reconsiders it, then log. NEVER send. resolveSkipped...
+          // only writes when there is no 'sent' row already (never clobbers a
+          // real delivery) and converts a leftover 'failed'/'sending' to skipped.
+          if (a.action === "skipped_stale" || a.action === "skipped_superseded") {
+            const wrote = await db.resolveSkippedNotificationLog({ ...base, status: a.action });
+            if (wrote) {
+              if (a.action === "skipped_superseded") emailsSuperseded++; else emailsSkippedStale++;
+              logSkip(user, a);
+            }
             continue;
           }
 
           // Gentle-tone skip: the follow-up is only for someone who has NOT
-          // already logged the prayer. If a 'done' row exists (user tapped
-          // Prayed on the dashboard, clicked the email's Yes link, or a
-          // qaḍā-marked one — none matter, they replied already), write a
-          // permanent skipped_stale so we never nudge them again for it.
+          // already logged the prayer. A 'done' response => skipped_already_logged.
           if (a.type === "followup") {
             const existing = await db.getResponse(user.id, a.prayer, date);
             if (existing && existing.status === "done") {
-              const claimed = await db.claimNotificationLog({ ...base, status: "skipped_stale" });
-              if (claimed) {
-                emailsSkippedStale++;
-                logSkip(user, { ...a, reason: "already-logged" });
-              }
+              const wrote = await db.resolveSkippedNotificationLog({ ...base, status: "skipped_already_logged" });
+              if (wrote) { emailsSkippedStale++; logSkip(user, { ...a, reason: "already-logged" }); }
               continue;
             }
           }
 
-          // Per-tick rate cap: refuse to claim once the ceiling is reached so a
-          // large user-base catches up across multiple ticks rather than one
-          // SMTP flood. The email stays unlogged, and the next tick sees it
-          // still due inside the widened SEND_GRACE window.
+          // Per-tick rate cap: stop claiming at the ceiling so a large user-base
+          // spreads across ticks rather than one SMTP flood. Unclaimed now → the
+          // next tick picks it up while the window is still open.
           if (emailsSent >= cap) {
-            console.warn(`[scheduler] rate-cap user=${user.id} prayer=${a.prayer} type=${a.type} cap=${cap} reason=per-tick-limit`);
+            console.warn(`[scheduler] rate-cap ${decision} cap=${cap}`);
             continue;
           }
 
-          // Due email: claim FIRST (ON CONFLICT DO NOTHING on the unique key).
-          // A conflicting insert means another tick already handled this email.
-          const claimed = await db.claimNotificationLog({ ...base, status: "sending" });
+          // Claim the send atomically. Fresh event => insert-as-'sending' wins
+          // the unique key. Retry event => the row already exists as
+          // 'failed'/abandoned, so claim it with an UPDATE guarded on that status
+          // that returns the row to exactly one concurrent tick.
+          let claimed = await db.claimNotificationLog({ ...base, status: "sending", claimed_at: now.toISOString() });
+          if (!claimed) claimed = await db.retryClaimNotificationLog(base, now.toISOString());
           if (!claimed) continue;
 
           const ev = plan.find((p) => p.name === a.prayer);
@@ -526,21 +604,25 @@ async function tick(nowOverride) {
             const mode = DRY_RUN ? "dry-run-sent" : "sent";
             if (a.type === "reminder") {
               await upsertPendingResponse(user.id, user.group_id, a.prayer, date);
-              console.log(`[scheduler] ${mode} user=${user.id} prayer=${a.prayer} type=reminder at=${ev.at.toISOString()} scheduled_at=${a.scheduledAt.toISOString()} now=${now.toISOString()}`);
+              console.log(`[scheduler] ${mode} ${decision} at=${ev ? ev.at.toISOString() : ""}`);
             } else if (a.type === "followup") {
               const existing = await db.getResponse(user.id, a.prayer, date);
               if (existing) {
                 await db.updateResponse(existing.id, { followup_sent_at: new Date().toISOString() });
               }
-              console.log(`[scheduler] ${mode} user=${user.id} prayer=${a.prayer} type=followup at=${ev.at.toISOString()} scheduled_at=${a.scheduledAt.toISOString()} now=${now.toISOString()}`);
+              console.log(`[scheduler] ${mode} ${decision} at=${ev ? ev.at.toISOString() : ""}`);
             } else {
-              console.log(`[scheduler] ${mode} user=${user.id} prayer=${a.prayer} type=${a.type} scheduled_at=${a.scheduledAt.toISOString()} now=${now.toISOString()}`);
+              console.log(`[scheduler] ${mode} ${decision}`);
             }
           } else {
-            // Send failed: release the claim so the next tick can retry inside the
-            // remaining window. Once the window closes it becomes skipped_stale.
-            await db.deleteNotificationLog(claimed.id);
-            console.error(`[scheduler] send-failed user=${user.id} prayer=${a.prayer} type=${a.type} scheduled_at=${a.scheduledAt.toISOString()} now=${now.toISOString()} reason=smtp-error error=${result.error}`);
+            // Send failed: KEEP the row and mark it 'failed' with the provider
+            // error, so the next tick can retry it while the window is open. The
+            // row is never deleted — a real delivery that raced a crash stays
+            // deduped, and a genuine failure is auditable. Past the window it is
+            // converted to skipped_stale by the normal skip path.
+            await db.markNotificationLogFailed(claimed.id, result.error);
+            emailsFailed++;
+            console.error(`[scheduler] send-failed ${decision} error=${result.error}`);
           }
         }
 
@@ -578,13 +660,14 @@ async function tick(nowOverride) {
           }
         }
       } catch (err) {
+        userErrors++;
         console.error(`[scheduler] error for user ${user.id}:`, err.message);
       }
     }
 
     // One compact summary line so ops can grep the tick's total effect without
     // parsing every per-email log.
-    console.log(`[scheduler] tick-complete now=${now.toISOString()} users=${usersSeen} sent=${emailsSent} skipped=${emailsSkippedStale} dry_run=${DRY_RUN}`);
+    console.log(`[scheduler] tick-complete now=${now.toISOString()} users=${usersSeen} sent=${emailsSent} skipped_stale=${emailsSkippedStale} superseded=${emailsSuperseded} failed=${emailsFailed} user_errors=${userErrors} dry_run=${DRY_RUN}`);
   } catch (err) {
     tickError = err && err.message ? err.message : String(err);
     throw err;
@@ -599,6 +682,9 @@ async function tick(nowOverride) {
         users_seen: usersSeen,
         emails_sent: emailsSent,
         emails_skipped_stale: emailsSkippedStale,
+        emails_superseded: emailsSuperseded,
+        emails_failed: emailsFailed,
+        user_errors: userErrors,
         dry_run: DRY_RUN,
       });
     } catch (hbErr) {
@@ -616,6 +702,8 @@ module.exports = {
   buildSpecialEvents,
   planTickActions,
   notifPrefsOf,
+  handledSetFrom,
   SEND_GRACE_MIN,
+  MIN_USER_GAP_MIN,
   SPECIAL_KEYS,
 };

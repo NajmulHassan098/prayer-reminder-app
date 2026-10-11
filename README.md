@@ -13,7 +13,8 @@ A group-based prayer-time reminder and tracking app, deployed on **Vercel** with
   The app asks the API fresh for each day's times instead of storing a fixed
   time, so it **automatically follows the daily shift in sunrise/sunset** — nothing
   needs to be updated by hand.
-- On a repeating schedule (every 5 minutes), a scheduler checks each user's own
+- On a repeating schedule (an external HTTP trigger firing about every minute),
+  a scheduler checks each user's own
   local prayer times and sends **two emails per prayer — one before, one after**:
   1. **Before the prayer:** a "time to prepare" reminder (default: 30 minutes
      ahead of the prayer time; each user can pick 5–120 on `/notifications`).
@@ -116,8 +117,9 @@ Copy `.env.example` to `.env` and fill in real values:
 | `PRE_REMINDER_MINUTES` | Default minutes **before** a prayer for the "time to prepare" reminder (default 30; per-user override wins). |
 | `FOLLOWUP_DELAY_MINUTES` | Default minutes **after** a prayer for the "Did you get to pray?" follow-up (default 30; per-user override wins). |
 | `MISSED_AFTER_MINUTES` | Minutes after a prayer before it's auto-marked missed (default 120). |
-| `SEND_GRACE_MINUTES` | Width of each email's send window in minutes (default 15). A stale email is logged `skipped_stale` and never caught up. |
-| `MAX_EMAILS_PER_TICK` | Hard cap on real emails sent by one invocation (default 50). Claims past the cap are released for the next tick. |
+| `SEND_GRACE_MINUTES` | Width of each email's send window in minutes (default 10). A window that closed is logged `skipped_stale` and never caught up. |
+| `MIN_EMAIL_GAP_MINUTES` | Minimum spacing between any two emails to the same user (default 10). Two emails nearer than this are collapsed: the follow-up loses to a neighbouring pre-reminder and is logged `skipped_superseded`. |
+| `MAX_EMAILS_PER_TICK` | Hard cap on real emails sent by one invocation (default 50). Events past the cap are left unclaimed and picked up by the next tick while their window is still open. |
 | `SCHEDULER_DRY_RUN` | `1`/`true`: exercise the whole claim→log→auto-mark pipeline **without** touching SMTP. |
 | `CRON_SECRET` | Shared secret that authorizes the scheduler endpoint. **Must be set in production.** |
 | `SMOKE_TEST_EMAIL` | Recipient for `npm run smoke-reminder` (ops-only, one manual test email). |
@@ -162,14 +164,47 @@ SCHEDULER_DRY_RUN=1 npm run tick-once   # one dry-run tick: logs subjects, sends
 ## Cron & reminders
 
 The scheduler logic is in [`src/services/scheduler.js`](src/services/scheduler.js).
-Each **tick** runs `tick()`, which fires an email only inside a narrow window
-(`scheduled_at ≤ now < scheduled_at + SEND_GRACE_MINUTES`, default 15 min). An
-email whose window has closed is permanently logged `skipped_stale` and never
-caught up, so downtime can never stack late reminders on top of the next prayer.
-**The tick must run at least every 5 minutes** or emails fall outside the window.
-The app never self-schedules; pick an external trigger:
+Each **tick** runs `tick()`. For every user it rebuilds the day's plan from their
+actual Aladhan times (anchored as absolute instants in *their* timezone) and
+sends an email only inside a narrow window
+(`due_at ≤ now < due_at + SEND_GRACE_MINUTES`, default **10 min**). Each reminder
+is claimed atomically in `notifications_log` (unique on
+`user_id, prayer_name, date, type`) before it is sent, so overlapping ticks can
+never double-mail anyone. Outcomes use an explicit status flow:
 
-### Option B — GitHub Action (primary; works on every plan)
+`pending`/`sending` → `sent` | `failed` | `skipped_stale` | `skipped_superseded` | `skipped_already_logged`
+
+- **never late** — a window that closed is written `skipped_stale` and is never
+  caught up, so downtime can't stack old reminders on top of the next prayer;
+- **never two together** — two emails nearer than `MIN_EMAIL_GAP_MINUTES`
+  (default 10) to the same user are collapsed: the follow-up loses to a
+  neighbouring pre-reminder, and the loser is `skipped_superseded`. At most one
+  daily email is sent per user per tick;
+- **never lost** — a failed SMTP attempt is kept as `failed` (with the provider
+  error) and retried on the next tick while the window is still open; an
+  abandoned in-flight claim older than 2 minutes is reclaimed automatically.
+
+Because the window is only ~10 minutes, **the tick must run about every 1
+minute.** The app never self-schedules; pick a reliable external trigger:
+
+### Reliable 1-minute trigger (primary — recommended)
+GitHub's `schedule:` is best-effort and is often delayed 10–30+ minutes or
+skipped, which is exactly what made reminders arrive late or in bursts. Use a
+real HTTP scheduler that calls the endpoint every minute with the Bearer secret.
+**Never hardcode the secret** — store it in the scheduler's own secret/env field.
+
+- **cron-job.org (free):** add a job → *HTTP request* → URL
+  `https://your-app.vercel.app/api/cron/prayer-scheduler`, method `POST`, and in
+  the *Advanced settings* → *HTTP headers* add
+  `Authorization: Bearer <CRON_SECRET>`. Set the interval to **1 minute**.
+- **Upstash QStash (free tier):** create a *Schedule* for `* * * * *` with
+  `POST` to the same URL and a request header
+  `Authorization: Bearer <CRON_SECRET>`.
+
+A 1-minute cadence is safe because `tick()` is stateless and idempotent: a tick
+with nothing due sends nothing.
+
+### Option B — GitHub Action (backup)
 [`.github/workflows/run-scheduler.yml`](.github/workflows/run-scheduler.yml)
 calls the endpoint every 5 minutes and then curls `/api/health` to prove the tick
 landed. Add two repository secrets
@@ -178,33 +213,37 @@ landed. Add two repository secrets
 - `CRON_SECRET` = the same value set on Vercel.
 
 The workflow fails loudly (`::error::`) when `staleFor > 900` seconds, which
-turns every Action run into a heartbeat alarm.
+turns every Action run into a heartbeat alarm. Keep it running alongside the
+1-minute trigger as redundancy.
 
-### Option A — Vercel Cron (daily backstop)
+### Option A — Vercel Cron (daily last-resort backstop)
 `vercel.json` registers a once-per-day cron that hits
 `/api/cron/prayer-scheduler`:
 ```json
 "crons": [{ "path": "/api/cron/prayer-scheduler", "schedule": "0 3 * * *" }]
 ```
 > **Plan limit:** Vercel **Hobby** only allows cron **once per day** (a `*/5`
-> schedule fails the deploy). `0 3 * * *` runs in a low-traffic UTC hour and
-> serves as a refresh backstop only. On **Pro**, change it to `*/5 * * * *` and
-> the GitHub Action becomes optional redundancy. Vercel automatically sends
-> `Authorization: Bearer <CRON_SECRET>` when `CRON_SECRET` is set on the project.
+> or `* * * * *` schedule fails the deploy). This daily run is a refresh backstop
+> only — it cannot catch 10-minute windows. On **Pro**, change it to
+> `* * * * *` and it can serve as the primary trigger instead of cron-job.org.
+> Vercel automatically sends `Authorization: Bearer <CRON_SECRET>` when
+> `CRON_SECRET` is set on the project.
 
 ### `GET /api/health` (no auth)
-Returns whether the scheduler is alive and which way it is configured:
+Returns whether the scheduler is alive plus the last tick's outcome counts:
 ```json
 {
   "ok": true,
-  "scheduler": { "present": true, "lastTickAt": "…", "lastFinishedOk": true,
+  "scheduler": { "present": true, "lastTickAt": "…", "lastFinishedAt": "…",
                  "lastError": null, "usersSeen": 12, "emailsSent": 3,
-                 "staleFor": 143, "dryRun": false },
+                 "emailsSkippedStale": 1, "emailsSuperseded": 0, "emailsFailed": 0,
+                 "userErrors": 0, "dryRun": false, "staleFor": 42 },
   "env": { "hasSmtp": true, "hasCronSecret": true, "hasSupabaseUrl": true, "vercel": true },
   "emailMode": "live"
 }
 ```
-`staleFor` is seconds since the last tick started. Alert if it exceeds ~900.
+`staleFor` is seconds since the last tick started. Alert if it exceeds ~120 with
+a 1-minute trigger (or ~900 if you rely on the 5-minute GitHub backup).
 
 ### How the endpoint is secured
 `POST /api/cron/prayer-scheduler` rejects any request unless the

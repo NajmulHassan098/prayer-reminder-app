@@ -31,10 +31,10 @@ stub("./email", {
     // Subjects are now localized; these tests run the user at locale "en"
     // (see the prayerTimes stub below), so we parse the English templates.
     const mReminder = /🕌 (.+?) in about (\d+) minutes/.exec(subject);
-    const mFollow = /^Did you (get to )?pray (.+?)\?/.exec(subject);
+    const mFollow = /^Were you able to pray (.+?)\?/.exec(subject);
     let prayer, type;
     if (mReminder) { prayer = mReminder[1]; type = "reminder"; }
-    else if (mFollow) { prayer = mFollow[2]; type = "followup"; }
+    else if (mFollow) { prayer = mFollow[1]; type = "followup"; }
     else if (subject.includes("Suhoor")) { prayer = "Fast"; type = "suhoor"; }
     else if (subject.includes("Iftar")) { prayer = "Fast"; type = "iftar"; }
     else if (subject.includes("Taraweeh")) { prayer = "Taraweeh"; type = "taraweeh"; }
@@ -81,24 +81,66 @@ stub("../supabase", {
 const keyOf = (r) => `${r.user_id}|${r.prayer_name}|${r.date}|${r.type}`;
 
 stub("../db", {
-  // notifications_log: enforces UNIQUE(user_id, prayer_name, date, type).
-  getNotificationLogKeys: async (userId, date) =>
-    new Set(W.logRows.filter((r) => r.user_id === userId && r.date === date).map((r) => `${r.prayer_name}|${r.type}`)),
+  // notifications_log: enforces UNIQUE(user_id, prayer_name, date, type) and the
+  // status flow pending|sending -> sent|failed|skipped_stale|skipped_superseded|
+  // skipped_already_logged. W.currentTick is the fake clock for claim ages.
+  getNotificationLogStatuses: async (userId, date) => {
+    const m = new Map();
+    for (const r of W.logRows) {
+      if (r.user_id === userId && r.date === date) m.set(`${r.prayer_name}|${r.type}`, { status: r.status, claimed_at: r.claimed_at || null });
+    }
+    return m;
+  },
+  // Fresh insert claim; returns the row when this caller wins the unique key,
+  // null when a row already exists (handled or retryable).
   claimNotificationLog: async (entry) => {
     const w = W;
     const k = keyOf(entry);
     if (w.logKeys.has(k)) return null; // ON CONFLICT DO NOTHING
-    const row = { ...entry, id: `log-${++w.seq}`, sent_at: w.currentTick };
+    const row = { ...entry, id: `log-${++w.seq}`, sent_at: null, claimed_at: entry.claimed_at || w.currentTick };
     w.logRows.push(row); w.logKeys.add(k);
+    return row;
+  },
+  // Atomic retry claim: only a 'failed' row or an abandoned (> 2 min) in-flight
+  // row can be reclaimed; exactly one caller transitions it back to 'sending'.
+  retryClaimNotificationLog: async (base, claimedAtIso) => {
+    const w = W;
+    const k = keyOf({ ...base });
+    const row = w.logRows.find((r) => keyOf(r) === k && r.user_id === base.user_id && r.date === base.date);
+    if (!row) return null;
+    const abandonIso = moment.utc(claimedAtIso).subtract(2, "minutes").toISOString();
+    const retryable =
+      row.status === "failed" ||
+      ((row.status === "pending" || row.status === "sending") && row.claimed_at && row.claimed_at < abandonIso);
+    if (!retryable) return null;
+    row.status = "sending"; row.claimed_at = claimedAtIso;
     return row;
   },
   markNotificationLogSent: async (id) => {
     const row = W.logRows.find((r) => r.id === id);
-    if (row) { row.status = "sent"; row.sent_at = W.currentTick; }
+    if (row) { row.status = "sent"; row.sent_at = W.currentTick; row.claimed_at = W.currentTick; }
   },
+  markNotificationLogFailed: async (id, message) => {
+    const row = W.logRows.find((r) => r.id === id);
+    if (row) { row.status = "failed"; row.claimed_at = W.currentTick; row.error = String(message || ""); }
+  },
+  resolveSkippedNotificationLog: async (entry) => {
+    const w = W;
+    const k = keyOf(entry);
+    const row = w.logRows.find((r) => keyOf(r) === k && r.user_id === entry.user_id && r.date === entry.date);
+    if (!row) {
+      const created = { ...entry, id: `log-${++w.seq}`, sent_at: null, claimed_at: w.currentTick };
+      w.logRows.push(created); w.logKeys.add(k);
+      return created;
+    }
+    // Convert only a retryable/in-flight row; never clobber 'sent' or a skip.
+    if (["failed", "pending", "sending"].includes(row.status)) { row.status = entry.status; return row; }
+    return null;
+  },
+  // Legacy (unused by the scheduler now); kept so nothing else breaks.
   deleteNotificationLog: async (id) => {
     const w = W;
-    const i = w.logRows.findIndex((r) => r.id === id && r.status === "sending");
+    const i = w.logRows.findIndex((r) => r.id === id);
     if (i >= 0) { const k = keyOf(w.logRows[i]); w.logRows.splice(i, 1); w.logKeys.delete(k); }
   },
   // responses: UNIQUE(user_id, prayer_name, date) — insert throws on conflict.
@@ -121,9 +163,7 @@ stub("../db", {
     return null;
   },
   // Heartbeat stub — scheduler.tick() writes a single summary row in its
-  // finally block. Tests don't assert on it directly (S20 covers that), but
-  // they MUST have the function or the `db.upsertCronHeartbeat is not a
-  // function` noise floods stdout every replay.
+  // finally block.
   upsertCronHeartbeat: async (fields) => {
     W.heartbeats = W.heartbeats || [];
     W.heartbeats.push({ ...fields, at: W.currentTick });
@@ -271,8 +311,8 @@ test("S1 normal day: exactly 10 emails at the right local times", async () => {
   assert.match(pre.subject, /^🕌 Asr in about 30 minutes$/);
   assert.match(pre.html, /Be ready for Asr prayer in 30 minutes\./);
   const fu = w.emails.find((e) => e.prayer === "Asr" && e.type === "followup");
-  // Subject softened to "Did you get to pray ...?" (see i18n en.json).
-  assert.strictEqual(fu.subject, "Did you get to pray Asr?");
+  // Subject wording "Were you able to pray ...?" (see i18n en.json).
+  assert.strictEqual(fu.subject, "Were you able to pray Asr?");
   assert.match(fu.html, /yes=https:\/\/example\.test\/respond\?token=sIGNEDtok&action=yes/);
   assert.match(fu.html, /no=https:\/\/example\.test\/respond\?token=sIGNEDtok&action=no/);
 });
@@ -386,6 +426,25 @@ test("S9 close prayers (40 min and 8 min gaps): ≤1 email/tick, warning for <10
   // every skipped row must carry a valid skip reason.
   const skipped = w.logRows.filter((r) => r.status === "skipped_stale");
   for (const r of skipped) assert.ok(["window-expired", "tick-cap-older-due"].includes(r.reason) || r.reason === undefined, `bad skip reason on ${r.prayer_name}/${r.type}`);
+});
+
+// ---- S9c Minimum-gap collision (the "two arrive together" regression) ---------
+// Asr 16:00 → follow-up due 16:30; Maghrib 16:55 → pre-reminder due 16:25. The
+// two land only 5 min apart (< MIN_USER_GAP_MIN=10). The plan-time collapse must
+// keep the pre-reminder (higher precedence) and permanently supersede the
+// follow-up as skipped_superseded, so the user NEVER gets two emails together.
+test("S9c Asr follow-up + Maghrib pre collide within 10 min → only Maghrib pre sends, Asr follow-up skipped_superseded", async () => {
+  const { w } = await runDay({ times: { ...BASE_TIMES, asr: "16:00", maghrib: "16:55" } });
+  printTable("S9c timeline", timelineTable(w));
+  // The Maghrib pre-reminder IS delivered.
+  const maghribPre = sentEmails(w).find((e) => e.prayer === "Maghrib" && e.type === "reminder");
+  assert.ok(maghribPre, "Maghrib pre-reminder must be sent");
+  // The Asr follow-up is NOT sent, and its row is a permanent supersede.
+  assert.strictEqual(sentEmails(w).some((e) => e.prayer === "Asr" && e.type === "followup"), false, "Asr follow-up must not be sent when it collides");
+  const asrFu = w.logRows.find((r) => r.prayer_name === "Asr" && r.type === "followup");
+  assert.ok(asrFu && asrFu.status === "skipped_superseded", `Asr follow-up must be skipped_superseded, got ${asrFu && asrFu.status}`);
+  // Never two emails in one tick, and only the 9 non-collided reminders fire.
+  assertPassCriteria(w, 9);
 });
 
 // ---- S10 The original bug -----------------------------------------------------
@@ -551,17 +610,17 @@ test("S16 Isha=null: 8 emails go out, no isha row (sent or skipped_stale) in not
 
 // ---- S17 Already-logged skip ---------------------------------------------------
 // Plan Section D: a follow-up for a prayer the user already marked done must
-// not go out. The tick writes a permanent skipped_stale row and logs a
+// not go out. The tick writes a permanent skipped_already_logged row and logs a
 // structured SKIP-EMAIL line with reason=already-logged.
-test("S17 Asr marked done at 15:00 → Asr follow-up at 16:30 becomes skipped_stale(already-logged), no email", async () => {
+test("S17 Asr marked done at 15:00 → Asr follow-up at 16:30 becomes skipped_already_logged, no email", async () => {
   const { w, warnings } = await runDay({
     seedResponses: [{ prayer_name: "Asr", status: "done" }],
   });
   // No Asr follow-up email was sent.
   assert.strictEqual(sentEmails(w).some((e) => e.prayer === "Asr" && e.type === "followup"), false, "Asr follow-up must not be sent");
-  // The claim exists as skipped_stale so no later tick can resurrect it.
+  // The claim exists as skipped_already_logged so no later tick can resurrect it.
   const asrFu = w.logRows.find((r) => r.prayer_name === "Asr" && r.type === "followup");
-  assert.ok(asrFu && asrFu.status === "skipped_stale", "Asr follow-up row must be skipped_stale");
+  assert.ok(asrFu && asrFu.status === "skipped_already_logged", "Asr follow-up row must be skipped_already_logged");
   // Structured log line carries the new reason.
   assert.ok(warnings.some((x) => /SKIP-EMAIL user=u1 prayer=Asr type=followup .* reason=already-logged/.test(x)),
     `expected already-logged SKIP-EMAIL warning, got: ${warnings.filter(x => x.includes('Asr')).join(' | ')}`);

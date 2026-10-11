@@ -1,20 +1,24 @@
 name: Run prayer scheduler
 
-# Primary 5-minute trigger for the prayer reminder scheduler.
+# BACKUP trigger for the prayer reminder scheduler.
 #
-# WHY: Vercel's built-in cron on the Hobby plan only allows one invocation per
-# day, which is far too slow for prayer-anchored reminders that need to fire
-# every few minutes. This GitHub Action calls the secured /api/cron endpoint
-# on a proper 5-minute cadence, and every successful run verifies the tick
-# actually landed by reading /api/health immediately after.
+# IMPORTANT: GitHub's `schedule:` is BEST-EFFORT, not a real-time clock. On a
+# quiet repo it is frequently delayed 10-30+ minutes or skipped entirely — which
+# is exactly why reminders were arriving late or in clustered bursts (a late tick
+# finds several events already past their send window). Do NOT rely on this
+# workflow as the primary trigger.
+#
+# PRIMARY trigger: a dedicated external HTTP scheduler (cron-job.org free tier or
+# Upstash QStash) that calls POST /api/cron/prayer-scheduler with the Bearer
+# CRON_SECRET every 1 minute. See README "Reliable 1-minute trigger" for setup.
+# The tick is idempotent and cheap (one DB read per user + atomic claims), so a
+# 1-minute cadence is safe. This workflow stays as a belt-and-braces backup, and
+# the Vercel daily cron in vercel.json is the last-resort backstop.
 #
 # To enable it, add these two Repository Secrets (GitHub -> Settings -> Secrets
 # and variables -> Actions):
 #   CRON_URL     e.g. https://prayer-app-sepia.vercel.app/api/cron/prayer-scheduler
 #   CRON_SECRET  the same value you set as the CRON_SECRET env var on Vercel
-#
-# Note: GitHub schedules Actions at a *minimum* interval of 5 minutes, which
-# matches the scheduler's reminder windows in src/services/scheduler.js.
 
 on:
   schedule:
@@ -30,12 +34,30 @@ jobs:
           CRON_URL: ${{ secrets.CRON_URL }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
-          curl -sS -X POST "$CRON_URL" \
+          # Fail fast with a readable message if a secret is missing/empty
+          # (silently expanding to "Bearer " causes a confusing 401).
+          if [ -z "$CRON_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "::error::CRON_URL or CRON_SECRET Actions secret is not set (Settings -> Secrets and variables -> Actions)"
+            exit 1
+          fi
+          # Capture the HTTP code so auth failures are explained, not just exit 22.
+          CODE=$(curl -sS -X POST "$CRON_URL" \
             -H "Authorization: Bearer $CRON_SECRET" \
             -H "Content-Type: application/json" \
-            --fail-with-body
+            -o /tmp/cron-response.json -w '%{http_code}')
+          cat /tmp/cron-response.json; echo
+          if [ "$CODE" = "401" ]; then
+            echo "::error::401 Unauthorized — CRON_SECRET in GitHub Actions no longer matches the CRON_SECRET env var on Vercel. Re-sync them."
+            exit 1
+          elif [ "$CODE" -lt 200 ] || [ "$CODE" -ge 300 ]; then
+            echo "::error::Scheduler trigger returned HTTP $CODE"
+            exit 1
+          fi
 
       - name: Verify heartbeat (proof the scheduler actually ticked)
+        # Runs even when the trigger step failed, so the log always shows how
+        # stale the scheduler is.
+        if: always()
         # Reads /api/health on the same host the cron URL points at. Prints
         # staleFor (seconds since the last tick started) so a silent prod
         # failure (missing CRON_SECRET, missing SMTP, etc.) is visible in the
@@ -43,6 +65,10 @@ jobs:
         env:
           CRON_URL: ${{ secrets.CRON_URL }}
         run: |
+          if [ -z "$CRON_URL" ]; then
+            echo "::warning::CRON_URL secret not set; skipping heartbeat check"
+            exit 0
+          fi
           HEALTH_URL=$(echo "$CRON_URL" | sed 's|/api/cron/prayer-scheduler$|/api/health|')
           echo "GET $HEALTH_URL"
           BODY=$(curl -sS "$HEALTH_URL")

@@ -33,6 +33,10 @@ async function requireLogin(req, res, next) {
     // Today's Hijri date (calculated, civil-day convention) for every
     // authenticated page — the nav shows it and it changes daily on its own.
     res.locals.hijriToday = formatHijri();
+    // Absolute path of the current request; the nav partial uses this to mark
+    // the active link with aria-current="page" on the very first paint (so the
+    // indicator works with JS disabled and never flashes in late).
+    res.locals.currentPath = req.path;
     next();
   } catch (error) {
     console.error(`[auth-middleware] Error in requireLogin:`, error);

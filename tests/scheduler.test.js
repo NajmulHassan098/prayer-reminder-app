@@ -182,16 +182,19 @@ test("Missing prefs → everything enabled", () => {
   for (const name of ["Fajr", "Dhuhr", "Asr", "Maghrib", "Isha"]) assert.ok(prefs.enabled(name));
 });
 
-test("Two emails due in one tick → later scheduledAt is sent, older marked skipped_stale (one-email cap)", () => {
+test("Two emails due within MIN gap in one tick → pre-reminder wins, follow-up skipped_superseded (never two together)", () => {
   // Compressed day where Asr's pre window and Dhuhr's follow-up window overlap:
   // Dhuhr 12:30 (follow-up 13:00–13:10 PKT) and Asr at 13:35 (pre 13:05–13:15).
+  // The two are only 5 min apart (< MIN_USER_GAP_MIN=10), so the minimum-gap
+  // collapse runs at PLAN time and the follow-up permanently loses to the
+  // pre-reminder (higher precedence) as skipped_superseded, not skipped_stale.
   const tight = { ...ROW, asr: "13:35" };
   const acts = actionsAt(tight, "2026-10-09T08:07:00Z"); // 13:07 PKT: both due
   const dhuhrFu = find(acts, "Dhuhr", "followup");  // scheduled 13:00
   const asrPre = find(acts, "Asr", "reminder");     // scheduled 13:05
-  assert.strictEqual(asrPre.action, "send");        // later scheduledAt wins
-  assert.strictEqual(dhuhrFu.action, "skipped_stale");
-  assert.strictEqual(dhuhrFu.reason, "tick-cap-older-due");
+  assert.strictEqual(asrPre.action, "send");        // pre-reminder wins
+  assert.strictEqual(dhuhrFu.action, "skipped_superseded");
+  assert.strictEqual(dhuhrFu.reason, "gap-superseded");
   assert.strictEqual(acts.filter((a) => a.action === "send").length, 1);
 });
 

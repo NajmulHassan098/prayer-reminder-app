@@ -58,7 +58,7 @@ test("i18n: every supported locale has the exact same key set as English", () =>
 });
 
 test("i18n: interpolation, fallback chain, and RTL detection", () => {
-  assert.strictEqual(t("en", "email.subject.followup", { prayer: "Asr" }), "Did you get to pray Asr?");
+  assert.strictEqual(t("en", "email.subject.followup", { prayer: "Asr" }), "Were you able to pray Asr?");
   // A real locale returns its own (softened) translation, never the raw key.
   assert.strictEqual(t("tr", "email.subject.followup", { prayer: "İkindi" }), "İkindi namazını kılabildin mi?");
   // A totally unknown key returns the key itself (and warns once).

@@ -78,20 +78,27 @@ CREATE TABLE IF NOT EXISTS responses (
 -- Notifications log table
 -- One row per (user, prayer, LOCAL date, email type) — the unique key below is
 -- the dedup contract the scheduler relies on (insert-first claim, ON CONFLICT DO
--- NOTHING). status:
---   sent          = email actually delivered
---   skipped_stale = send window (scheduled_at .. +SEND_GRACE_MINUTES) closed
---                   before a tick ran; recorded so it is never retried
---   sending       = transient claim while SMTP is in flight; deleted again if
---                   the send fails so the next tick can retry inside the window
+-- NOTHING). status is the explicit send-flow (migration 0008):
+--   sent                  = email actually delivered
+--   pending | sending     = claimed/in-flight; claimed_at older than 2 min is
+--                           treated as abandoned and reclaimed by a later tick
+--   failed                = SMTP attempt failed (error holds why); retryable
+--                           on the next tick while the send window is open
+--   skipped_stale         = send window (scheduled_at .. +SEND_GRACE_MINUTES)
+--                           closed before a tick ran; never retried
+--   skipped_superseded    = a nearer/more-relevant email won this user's slot
+--                           (min-gap or per-tick cap); never caught up late
+--   skipped_already_logged= follow-up suppressed because the prayer was logged
 CREATE TABLE IF NOT EXISTS notifications_log (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   user_id UUID NOT NULL,
   prayer_name TEXT NOT NULL,
   date TEXT NOT NULL, -- YYYY-MM-DD in the USER's timezone
-  type TEXT NOT NULL, -- reminder | followup
-  status TEXT NOT NULL DEFAULT 'sent', -- sent | skipped_stale | sending
+  type TEXT NOT NULL, -- reminder | followup | seasonal keys
+  status TEXT NOT NULL DEFAULT 'sent', -- see the status list above
   scheduled_at TIMESTAMP WITH TIME ZONE, -- UTC instant the email was due at
+  claimed_at TIMESTAMP WITH TIME ZONE, -- UTC instant a tick last claimed the row
+  error TEXT, -- provider error captured when status=failed
   sent_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   UNIQUE(user_id, prayer_name, date, type)
 );

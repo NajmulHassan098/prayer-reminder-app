@@ -125,6 +125,9 @@ app.get("/api/health", async (req, res) => {
         usersSeen: hb.users_seen,
         emailsSent: hb.emails_sent,
         emailsSkippedStale: hb.emails_skipped_stale,
+        emailsSuperseded: hb.emails_superseded,
+        emailsFailed: hb.emails_failed,
+        userErrors: hb.user_errors,
         dryRun: !!hb.dry_run,
         staleFor: lastStartMs ? Math.round((now - lastStartMs) / 1000) : null,
       };

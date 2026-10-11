@@ -55,6 +55,39 @@
       </div>
     <% } %>
 
+    <% if (reminder) { %>
+      <!-- Reminder status: mirrors the server scheduler's plan for this prayer.
+           The emails are sent by the backend tick (external cron -> /api/cron),
+           NOT by this page — this only shows what is scheduled and when. -->
+      <div id="reminder-card" class="bg-slate-900/60 backdrop-blur border border-slate-800 rounded-2xl p-5 mb-6 shadow-lg shadow-black/20">
+        <div class="flex items-center justify-between gap-3">
+          <h2 class="text-sm font-bold uppercase tracking-wider text-emerald-300">Email reminders</h2>
+          <a href="/notifications" class="text-xs text-slate-400 hover:text-emerald-400 underline">change</a>
+        </div>
+        <ul class="mt-3 space-y-2 text-sm">
+          <li class="flex items-start gap-2">
+            <span class="mt-1.5 w-2 h-2 rounded-full shrink-0 <%= reminder.preEnabled ? 'bg-emerald-400' : 'bg-slate-600' %>"></span>
+            <% if (reminder.preEnabled) { %>
+              <span class="text-slate-300">A reminder is scheduled <b class="text-white"><%= reminder.preMinutes %> min before <%= reminder.name %></b> <span class="js-reminder-time font-mono text-slate-400" data-at="<%= reminder.preAtUTC %>"></span></span>
+            <% } else { %>
+              <span class="text-slate-500">Pre-prayer reminder is off for <%= reminder.name %>.</span>
+            <% } %>
+          </li>
+          <li class="flex items-start gap-2">
+            <span class="mt-1.5 w-2 h-2 rounded-full shrink-0 <%= reminder.postEnabled ? 'bg-emerald-400' : 'bg-slate-600' %>"></span>
+            <% if (reminder.postEnabled) { %>
+              <span class="text-slate-300">Then "Did you pray?" <b class="text-white"><%= reminder.postMinutes %> min after <%= reminder.name %></b> <span class="js-reminder-time font-mono text-slate-400" data-at="<%= reminder.postAtUTC %>"></span></span>
+            <% } else { %>
+              <span class="text-slate-500">Follow-up is off for <%= reminder.name %>.</span>
+            <% } %>
+          </li>
+        </ul>
+        <% if (reminder.preEnabled) { %>
+          <p id="reminder-status" class="mt-3 text-xs text-slate-500" data-pre-at="<%= reminder.preAtUTC %>"></p>
+        <% } %>
+      </div>
+    <% } %>
+
     <!-- Today's schedule -->
     <% if (todayTimes) { %>
       <div class="bg-slate-900/60 backdrop-blur border border-slate-800 rounded-2xl p-6 mb-6 shadow-xl shadow-black/20">
@@ -162,6 +195,41 @@
 
       render();
       setInterval(render, 1000);
+    })();
+  </script>
+  <% } %>
+
+  <% if (reminder) { %>
+  <script>
+    // Show the scheduled reminder times in the visitor's own clock and light up
+    // a status line when the pre-reminder moment arrives. This is display only;
+    // the backend scheduler is what actually sends the email.
+    (function () {
+      function fmt(iso) {
+        try { return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
+        catch (e) { return ''; }
+      }
+      Array.prototype.forEach.call(document.querySelectorAll('.js-reminder-time'), function (el) {
+        var t = fmt(el.getAttribute('data-at'));
+        if (t) el.textContent = '· ' + t;
+      });
+      var st = document.getElementById('reminder-status');
+      if (st) {
+        var preAt = new Date(st.getAttribute('data-pre-at')).getTime();
+        function paint() {
+          var now = Date.now();
+          if (now < preAt) {
+            var mins = Math.max(1, Math.round((preAt - now) / 60000));
+            st.textContent = '\u23F0 Scheduled \u2014 goes out in about ' + mins + ' min.';
+            st.className = 'mt-3 text-xs text-slate-500';
+          } else {
+            st.textContent = '\u2709 Reminder time reached \u2014 check your inbox.';
+            st.className = 'mt-3 text-xs text-emerald-400';
+          }
+        }
+        paint();
+        setInterval(paint, 30000);
+      }
     })();
   </script>
   <% } %>
